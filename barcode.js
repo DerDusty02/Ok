@@ -20,7 +20,7 @@
 
 const FORMATE = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
 const OFF_URL = 'https://world.openfoodfacts.org';
-const OFF_FELDER = ['code', 'product_name', 'product_name_de', 'generic_name', 'generic_name_de', 'brands', 'product_quantity', 'product_quantity_unit', 'nutriments', 'categories_tags', 'ingredients_tags'].join(',');
+const OFF_FELDER = ['code', 'product_name', 'product_name_de', 'generic_name', 'generic_name_de', 'brands', 'product_quantity', 'product_quantity_unit', 'serving_quantity', 'serving_quantity_unit', 'nutriments', 'categories_tags', 'ingredients_tags'].join(',');
 // Ordner dieser Datei, damit vendor/ auch gefunden wird, wenn die App nicht im Wurzelverzeichnis liegt
 const BASIS = (() => { try { return new URL('.', document.currentScript.src).href; } catch (e) { return ''; } })();
 
@@ -52,7 +52,19 @@ function normieren(roh, format = '') {
 
 /* ---------- Open Food Facts ---------- */
 const r2 = v => Math.round(v * 100) / 100;
-function wert(n, k) { const v = Number(n[k]); return n[k] !== '' && n[k] != null && Number.isFinite(v) && v >= 0 ? v : null; }
+// Open Food Facts liefert Zahlen mal als Zahl, mal als Text
+function wert(n, k) {
+  if (n[k] === '' || n[k] == null) return null;
+  const v = Number(String(n[k]).replace(',', '.'));
+  return Number.isFinite(v) && v >= 0 ? v : null;
+}
+// Wert pro 100 g. Steht auf der Packung nur ein Wert pro Portion, wird er über die Portionsgröße umgerechnet.
+function pro100(n, k, portion) {
+  const v = wert(n, k);
+  if (v != null || !portion) return v;
+  const p = wert(n, k.replace(/_100g$/, '_serving'));
+  return p == null ? null : p * 100 / portion;
+}
 const NAEHRSTOFFE = { protein: 'proteins_100g', kh: 'carbohydrates_100g', zucker: 'sugars_100g', fett: 'fat_100g', gesFett: 'saturated-fat_100g', ballaststoffe: 'fiber_100g', salz: 'salt_100g', omega3: 'omega-3-fat_100g' };
 // Zutaten, deren Zucker als zugesetzt zählt
 const ZUCKER = new Set(['sugar', 'cane-sugar', 'brown-sugar', 'raw-cane-sugar', 'glucose', 'dextrose', 'fructose', 'glucose-syrup', 'glucose-fructose-syrup', 'fructose-glucose-syrup', 'invert-sugar', 'invert-sugar-syrup', 'sugar-syrup', 'caramelised-sugar-syrup', 'honey', 'maple-syrup', 'agave-syrup', 'rice-syrup'].map(x => 'en:' + x));
@@ -103,11 +115,13 @@ function offUmrechnen(p, code) {
   d.name = String(p.product_name_de || p.product_name || p.generic_name_de || p.generic_name || '').trim().replace(/\s+/g, ' ');
   const marke = String(p.brands || '').split(',')[0].trim();
   if (marke) d.marke = marke;
-  let kcal = wert(n, 'energy-kcal_100g');
-  if (kcal == null) { const kj = wert(n, 'energy-kj_100g') ?? wert(n, 'energy_100g'); if (kj != null) kcal = kj / 4.184; }
+  const sq = wert(p, 'serving_quantity'), su = String(p.serving_quantity_unit || 'g').toLowerCase();
+  const portion = sq > 0 && (su === 'g' || su === 'ml') ? sq : 0;
+  let kcal = pro100(n, 'energy-kcal_100g', portion);
+  if (kcal == null) { const kj = pro100(n, 'energy-kj_100g', portion) ?? pro100(n, 'energy_100g', portion); if (kj != null) kcal = kj / 4.184; }
   if (kcal != null) d.kcal = Math.round(kcal);
-  for (const [k, f] of Object.entries(NAEHRSTOFFE)) { const v = wert(n, f); if (v != null) d[k] = r2(v); }
-  if (d.salz == null) { const na = wert(n, 'sodium_100g'); if (na != null) d.salz = r2(na * 2.5); }
+  for (const [k, f] of Object.entries(NAEHRSTOFFE)) { const v = pro100(n, f, portion); if (v != null) d[k] = r2(v); }
+  if (d.salz == null) { const na = pro100(n, 'sodium_100g', portion); if (na != null) d.salz = r2(na * 2.5); }
   // Packungsgröße als Stück, damit Rezepte „1 Packung“ sagen können
   const q = Number(p.product_quantity), u = String(p.product_quantity_unit || 'g').toLowerCase();
   if (q > 0 && q <= 10000 && (u === 'g' || u === 'ml')) { d.gProStk = r2(q); d.stkName = 'Packung'; }

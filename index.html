@@ -927,6 +927,15 @@ function lmAnwenden(d, o) {
     : `${o.quelle || 'Open Food Facts'} · ${Lebensmittel.titel(o)}`;
 }
 const lmVorschlagName = o => o.herkunft === 'bls' ? (kurzName(o.name) || o.name) : o.name;
+// Suche für Vorschläge in Formularen. Findet ein Produktname wie „Haferflocken zart“ nichts,
+// werden hinten Wörter weggelassen, zuletzt zählt das längste Wort allein.
+function vorschlaegeSuchen(q, opts) {
+  let hits = LM.suche(q, opts);
+  const w = q.split(/\s+/).filter(x => x.length >= 3);
+  for (let n = w.length - 1; !hits.length && n >= 1; n--) hits = LM.suche(w.slice(0, n).join(' '), opts);
+  for (const x of [...w].sort((a, b) => b.length - a.length)) { if (hits.length) break; hits = LM.suche(x, opts); }
+  return hits;
+}
 function hitHtml(o) {
   const wo = o.herkunft === 'eigen' ? ['Eigenes Lebensmittel', o.marke] : [LM.gruppeName(o)];
   return `<li><button type="button" class="dbs-hit" data-lm="${esc(o.id)}"><span class="dbs-name">${esc(o.name)}</span><span class="dbs-meta">${esc(wo.filter(Boolean).join(' · '))} · ${num(o.kcal)} kcal · ${num(o.protein || 0, 1)} g Eiweiß</span></button></li>`;
@@ -2260,7 +2269,8 @@ function renderZForm() {
   $('#zfScan').onclick = async () => {
     const r = await produktPerBarcode();
     if (!r || !r.o || S.zEdit !== ze) return;
-    lmAnwenden(d, r.o);
+    if (r.ohneWerte) { if (!String(d.name).trim()) d.name = r.o.name; S.zfDbQ = r.o.name; }
+    else lmAnwenden(d, r.o);
     if (!String(d.name).trim()) d.name = r.o.name;
     renderZForm(); toast(r.text);
   };
@@ -2272,7 +2282,7 @@ function renderZForm() {
     if (LM.blsStatus !== 'ok') dbl.innerHTML = '<li class="hint">Datenbank wird geladen …</li>';
     await LM.laden();
     if (!dbq.isConnected || dbq.value.trim() !== q) return;
-    const hits = LM.suche(q, { max: 8, veg: S.vegFilter });
+    const hits = vorschlaegeSuchen(q, { max: 8, veg: S.vegFilter });
     const fehlt = LM.blsStatus === 'fehler' ? '<li class="hint">Der Bundeslebensmittelschlüssel konnte nicht geladen werden. Trag die Werte von der Packung ein.</li>' : '';
     dbl.innerHTML = (hits.map(hitHtml).join('') + fehlt) || '<li class="hint">Kein Treffer. Markenprodukte stehen nicht im Bundeslebensmittelschlüssel: Scann den Barcode oder trag die Werte von der Packung ein.</li>';
   };
@@ -2440,14 +2450,41 @@ async function barcodeNachschlagen(code) {
     return off ? { code, off } : { code, fehlt: true };
   } catch (e) { return { code, fehler: e.message }; }
 }
-// Für Formulare: Barcode lesen und das Produkt dazu suchen. Gibt { o, text } zurück, null bei Abbruch.
+const naehrwerte = o => NW_FELDER.filter(k => hat(o[k])).length;
+// Hinweis über dem Formular, je nachdem, wie vollständig Open Food Facts das Produkt kennt
+function offHinweis(off) {
+  const name = off.name ? `„${esc(Lebensmittel.titel(off))}“` : '';
+  const n = naehrwerte(off);
+  const text = !n ? `<strong>Open Food Facts kennt ${name || 'das Produkt'}, hat aber keine Nährwerte dazu.</strong> Trag sie von der Packung ein oder übernimm unten die Werte eines ähnlichen Lebensmittels.`
+    : !hat(off.kcal) || n < 4 ? `<strong>Gefunden bei Open Food Facts${name ? ': ' + name : ''}.</strong> Dort sind nicht alle Nährwerte eingetragen. Ergänz die fehlenden von der Packung.`
+    : `<strong>Gefunden bei Open Food Facts${name ? ': ' + name : ''}.</strong> Die Nährwerte sind eingetragen. Vergleich sie mit der Packung und speichere. Danach erkennt das Kochbuch das Produkt auch ohne Internet.`;
+  return `${text} ${OFF_HINWEIS}`;
+}
+// Trägt ein gefundenes Produkt ins Formular eines eigenen Lebensmittels ein. Steht noch kein kcal-Wert drin,
+// kommen alle Nährwerte vom Produkt, sonst nur die fehlenden. Name, Marke und Packung nur, wo noch nichts steht.
+function produktEintragen(d, p) {
+  const s = v => typeof v === 'number' ? String(v).replace('.', ',') : String(v);
+  const leer = k => !String(d[k] ?? '').trim();
+  const alles = leer('kcal');
+  for (const k of ['name', 'marke', 'gProStk', 'stkName']) if (p[k] != null && p[k] !== '' && leer(k)) d[k] = s(p[k]);
+  for (const k of NW_FELDER) if (hat(p[k]) && (alles || leer(k))) d[k] = s(p[k]);
+  if (!d.artTouched && p.kategorie) { d.kategorie = p.kategorie; d.art = p.art; }
+  if (p.zuckerZugesetzt) d.zuckerZugesetzt = true;
+  if (p.trocken) d.trocken = true;
+  if (p.barcode) d.barcode = p.barcode;
+  if (p.quelle) d.quelle = p.quelle;
+}
+// Für das Zutaten-Formular: Barcode lesen und das Produkt dazu suchen. Gibt { o, text, ohneWerte } zurück, null bei Abbruch.
 async function produktPerBarcode() {
   const code = await barcodeLesen();
   if (!code) return null;
   toast(`Suche ${code} …`);
   const r = await barcodeNachschlagen(code);
   if (r.eigen) return { o: r.eigen, text: `Werte von „${Lebensmittel.titel(r.eigen)}“ übernommen` };
-  if (r.off) return { o: { ...r.off, herkunft: 'off' }, text: 'Werte von Open Food Facts übernommen. Vergleich sie mit der Packung.' };
+  if (r.off) {
+    if (!naehrwerte(r.off)) return { o: { ...r.off, herkunft: 'off' }, ohneWerte: true, text: 'Open Food Facts kennt das Produkt, hat aber keine Nährwerte dazu. Trag sie von der Packung ein.' };
+    return { o: { ...r.off, herkunft: 'off' }, text: 'Werte von Open Food Facts übernommen. Vergleich sie mit der Packung.' };
+  }
   toast(r.fehler || `${code}: Dieses Produkt kennt Open Food Facts noch nicht. Trag die Werte von der Packung ein.`);
   return { o: null };
 }
@@ -2462,7 +2499,7 @@ async function lmScannen() {
   if (S.view !== 'lebensmittel') return;
   if (r.eigen) { lmZeigen(r.eigen.id); toast('Schon in deinen Lebensmitteln'); return; }
   if (r.off) {
-    lmBearbeiten(null, lmFormDaten(r.off), `<strong>Gefunden bei Open Food Facts.</strong> Vergleich die Werte mit der Packung und ergänz, was fehlt. Nach dem Speichern erkennt das Kochbuch das Produkt auch ohne Internet. ${OFF_HINWEIS}`);
+    lmBearbeiten(null, lmFormDaten(r.off), offHinweis(r.off));
     return;
   }
   lmBearbeiten(null, { ...leeresLm(), barcode: code }, r.fehler
@@ -2663,7 +2700,7 @@ function renderLmForm() {
     <div class="form-grid">
       <label for="lfName" class="wide">Name<input id="lfName" data-k="name" type="text" value="${esc(d.name)}" placeholder="z. B. Skyr Natur"></label>
       <label for="lfMarke">Marke<input id="lfMarke" data-k="marke" type="text" value="${esc(d.marke)}" placeholder="optional"></label>
-      <label for="lfBar" class="breit">Barcode (EAN)<span class="feld-knopf"><input id="lfBar" data-k="barcode" type="text" inputmode="numeric" value="${esc(d.barcode)}" placeholder="optional"><button class="btn-mini" type="button" id="lfScan">Scannen</button></span></label>
+      <label for="lfBar" class="breit">Barcode (EAN)<span class="feld-knopf"><input id="lfBar" data-k="barcode" type="text" inputmode="numeric" value="${esc(d.barcode)}" placeholder="optional"><button class="btn-mini" type="button" id="lfScan">Scannen</button></span><span class="field-hint" id="lfBarInfo" role="status">${d.barcode ? '' : 'Scannen oder eintippen, die Werte kommen dann von Open Food Facts'}</span></label>
       <label for="lfKat">Abteilung<select id="lfKat">${KATS.map(([v, l]) => `<option value="${v}" ${d.kategorie === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label for="lfArt">Art (für die Bewertung)<select id="lfArt">${ART.map(([v, l]) => `<option value="${v}" ${d.art === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${ZF_ZAHLEN.map(zahl).join('')}
@@ -2698,7 +2735,7 @@ function renderLmForm() {
     if (LM.blsStatus !== 'ok') dbl.innerHTML = '<li class="hint">Datenbank wird geladen …</li>';
     await LM.laden();
     if (!dbq.isConnected || dbq.value.trim() !== q) return;
-    const hits = LM.suche(q, { max: 6, veg: S.vegFilter, filter: 'bls' });
+    const hits = vorschlaegeSuchen(q, { max: 6, veg: S.vegFilter, filter: 'bls' });
     dbl.innerHTML = hits.length ? hits.map(hitHtml).join('') : `<li class="hint">${LM.blsStatus === 'fehler' ? 'Der Bundeslebensmittelschlüssel konnte nicht geladen werden.' : 'Kein Treffer. Trag die Werte von der Packung ein.'}</li>`;
   };
   let dbT;
@@ -2711,14 +2748,44 @@ function renderLmForm() {
     if (!String(d.name).trim()) d.name = lmVorschlagName(o);
     renderLmForm(); toast('Werte übernommen');
   });
-  if (!d.basis && !d.quelle) zeigeTreffer();
+  // Ohne Nährwerte gleich ähnliche Lebensmittel aus dem BLS vorschlagen
+  if (!d.basis && !String(d.kcal || '').trim()) zeigeTreffer();
+  // Barcode gescannt oder eingetippt: Produkt suchen und die Werte eintragen
+  const barcodeFuellen = async code => {
+    const info = $('#lfBarInfo');
+    const anderes = LM.perBarcode(code);
+    if (anderes && anderes.id !== le.id) { info.textContent = `Diesen Barcode hat schon „${Lebensmittel.titel(anderes)}“.`; return; }
+    info.textContent = 'Suche bei Open Food Facts …';
+    let off;
+    try { off = await Barcode.offAbfragen(code); }
+    catch (x) { if (S.lmEdit === le && info.isConnected) info.textContent = x.message; return; }
+    if (S.lmEdit !== le) return;
+    if (!off) { if (info.isConnected) info.textContent = 'Open Food Facts kennt diesen Barcode noch nicht. Trag die Werte von der Packung ein.'; return; }
+    produktEintragen(d, off);
+    le.hinweis = offHinweis(off);
+    S.lmDbQ = null;
+    renderLmForm();
+  };
   $('#lfScan').onclick = async () => {
     const code = await barcodeLesen();
     if (!code || S.lmEdit !== le) return;
     d.barcode = code; $('#lfBar').value = code;
-    const anderes = LM.perBarcode(code);
-    if (anderes && anderes.id !== le.id) { const err = $('#lfErr'); err.textContent = `Diesen Barcode hat schon „${Lebensmittel.titel(anderes)}“.`; err.hidden = false; }
+    barcodeFuellen(code);
   };
+  const bar = $('#lfBar');
+  // Ein Handscanner schickt nach der Nummer ein Enter, das soll nicht das Formular speichern
+  bar.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); bar.blur(); } });
+  bar.addEventListener('change', () => {
+    const info = $('#lfBarInfo');
+    const roh = String(d.barcode || '').trim();
+    if (!roh) { info.textContent = ''; return; }
+    const code = Barcode.normieren(roh);
+    if (!code) { info.textContent = 'Die Prüfziffer stimmt nicht. Vertippt?'; return; }
+    d.barcode = code; bar.value = code;
+    // Eingetippt: nur nachschlagen, solange noch keine Werte drinstehen
+    if (!String(d.kcal || '').trim()) barcodeFuellen(code);
+    else info.textContent = '';
+  });
   const zu = () => { S.lmEdit = null; S.lmDelAsk = false; renderLmPanel(); };
   $('#lfCancel').onclick = zu;
   const del = $('#lfDel'); if (del) del.onclick = () => { S.lmDelAsk = true; renderLmForm(); };

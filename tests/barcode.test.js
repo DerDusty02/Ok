@@ -47,6 +47,16 @@ test('rechnet kJ und Natrium um, wenn kcal oder Salz fehlen', () => {
   assert.equal(d.protein, undefined, 'fehlende Werte bleiben leer');
 });
 
+test('rechnet Angaben pro Portion auf 100 g um und liest Zahlen als Text', () => {
+  const d = B.offUmrechnen({ product_name: 'Riegel', serving_quantity: '40', serving_quantity_unit: 'g', nutriments: { 'energy-kcal_serving': 160, proteins_serving: '8', fat_serving: 6, 'saturated-fat_100g': '1,5' } }, '4006040001232');
+  assert.equal(d.kcal, 400);
+  assert.equal(d.protein, 20);
+  assert.equal(d.fett, 15);
+  assert.equal(d.gesFett, 1.5, 'ein Wert pro 100 g geht vor');
+  const ohne = B.offUmrechnen({ product_name: 'Riegel', nutriments: { 'energy-kcal_serving': 160 } }, '4006040001232');
+  assert.equal(ohne.kcal, undefined, 'ohne Portionsgröße keine Umrechnung');
+});
+
 test('leitet Abteilung, Art und Merkmale ab', () => {
   const z = (tags, extra = {}) => { const d = B.offUmrechnen({ product_name: extra.name || 'X', categories_tags: tags.map(t => 'en:' + t), ingredients_tags: (extra.zutaten || []).map(t => 'en:' + t), nutriments: extra.n || {} }, '4006040001232'); return [d.kategorie, d.art, d.zuckerZugesetzt, d.trocken]; };
   assert.deepEqual(z(['plant-based-foods', 'legumes', 'pulses', 'lentils']), ['trocken', 'huelsenfrucht', false, true]);
