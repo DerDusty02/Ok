@@ -428,6 +428,39 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .notice{background:var(--accent-soft);border-radius:var(--r);padding:14px 16px;font-size:.92rem}
 #toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translate(-50%,16px);opacity:0;pointer-events:none;background:var(--toast-bg);color:var(--toast-fg);padding:10px 16px;border-radius:999px;font-weight:700;font-size:.92rem;max-width:calc(100% - 32px);text-align:center;transition:opacity .2s,transform .2s;z-index:20}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* Lebensmittel */
+/* Barcode-Scanner */
+dialog.scan{border:0;border-radius:var(--r);padding:16px;width:min(560px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+dialog.scan[open]{display:flex;flex-direction:column;gap:12px}
+dialog.scan::backdrop{background:rgba(29,43,34,.6)}
+.scan-bild{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;flex:none}
+.scan-bild video{width:100%;height:100%;object-fit:cover;display:block}
+.scan-rahmen{position:absolute;inset:28% 10%;border:3px solid rgba(255,255,255,.9);border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.25)}
+.scan-rahmen::after{content:"";position:absolute;left:6%;right:6%;top:50%;height:2px;background:var(--spice);box-shadow:0 0 8px var(--spice)}
+.scan-form{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.scan-form label{flex:1 1 220px}
+.feld-knopf{display:flex;gap:6px;align-items:center}
+@media (min-width:380px){.form-grid .breit{grid-column:span 2}}
+.feld-knopf input{flex:1}
+
+#lmHinweis:empty,#lmPanel:empty{display:none}
+#lmPanel{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 136px)}
+.lmtab td.l:first-child{white-space:normal;min-width:min(60vw,240px)}
+.lmtab tbody tr[aria-current]{background:var(--accent-soft)}
+.lmtab td.lm-leer{white-space:normal}
+.lm-gr{display:none;color:var(--muted);font-size:.8rem}
+@media (max-width:600px){
+  .lmtab th:nth-child(2),.lmtab td:nth-child(2){display:none}
+  .lmtab td.l:first-child{min-width:42vw}
+  .lm-gr{display:block}
+}
+.lm-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.lm-top .sec-title{text-wrap:balance}
+.lm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px;align-items:start}
+.lm-facts{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:.92rem}
+.lm-facts dt{color:var(--muted);font-weight:700}
+.lm-facts dd{margin:0}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -445,6 +478,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       <button type="button" data-view="plan">Wochenplan <span class="badge" id="bPlan"></span></button>
       <button type="button" data-view="einkauf">Einkaufsliste <span class="badge" id="bEinkauf"></span></button>
       <button type="button" data-view="zutaten">Zutaten &amp; Nährwerte</button>
+      <button type="button" data-view="lebensmittel">Lebensmittel</button>
       <button type="button" data-view="ziele">Ziele</button>
     </nav>
   </div>
@@ -452,21 +486,15 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <main id="main"></main>
 <div id="toast" role="status" aria-live="polite"></div>
 
+<script src="lebensmittel.js"></script>
+<script src="barcode.js"></script>
 <script>
 (() => {
 'use strict';
 
 /* ---------- Konstanten ---------- */
-const KATS = [
-  ['obst-gemuese','Obst & Gemüse'],
-  ['kuehl','Kühlregal'],
-  ['brot','Brot & Backwaren'],
-  ['trocken','Nudeln, Reis & Getreide'],
-  ['konserven','Konserven & Gläser'],
-  ['tk','Tiefkühl'],
-  ['oel-gewuerze','Öl, Essig & Gewürze'],
-  ['sonstiges','Sonstiges']
-];
+// Abteilungen und Arten gehören zur Lebensmittel-Datenbank (lebensmittel.js)
+const KATS = Lebensmittel.KATEGORIEN;
 const KAT_NAME = Object.fromEntries(KATS);
 const TAGE = [['mo','Montag'],['di','Dienstag'],['mi','Mittwoch'],['do','Donnerstag'],['fr','Freitag'],['sa','Samstag'],['so','Sonntag']];
 const TAG_KURZ = { mo:'Mo', di:'Di', mi:'Mi', do:'Do', fr:'Fr', sa:'Sa', so:'So' };
@@ -478,23 +506,10 @@ const MZ_NAME = Object.fromEntries(MAHLZEITEN);
 const EINHEITEN = ['g','kg','ml','l','stk','el','tl','prise'];
 const E_LABEL = {g:'g',kg:'kg',ml:'ml',l:'l',el:'EL',tl:'TL',prise:'Prise'};
 const PLURAL = {Dose:'Dosen',Zehe:'Zehen',Packung:'Packungen',Kugel:'Kugeln',Bund:'Bund',Kopf:'Köpfe',Stange:'Stangen',Becher:'Becher',Glas:'Gläser',Stk:'Stk',Scheibe:'Scheiben',Wrap:'Wraps',Knolle:'Knollen',Flasche:'Flaschen',Beutel:'Beutel'};
-const VIEWS = ['rezepte','plan','einkauf','zutaten','ziele'];
-const ART = [
-  ['gemuese','Gemüse'],
-  ['obst','Obst'],
-  ['huelsenfrucht','Hülsenfrüchte'],
-  ['vollkorn','Vollkorn'],
-  ['weissmehl','Weißmehl & Weißreis'],
-  ['staerke','Kartoffeln & Stärke'],
-  ['eiweiss','Eiweiß & Milchprodukte'],
-  ['nuesse','Nüsse & Samen'],
-  ['fett','Öl & Butter'],
-  ['suess','Zucker, Sirup & Honig'],
-  ['aromaten','Kräuter, Gewürze & Würze'],
-  ['sonstiges','Sonstiges']
-];
+const VIEWS = ['rezepte','plan','einkauf','zutaten','lebensmittel','ziele'];
+const ART = Lebensmittel.ARTEN;
 const ART_NAME = Object.fromEntries(ART);
-const ART_DEFAULT = {'obst-gemuese':'gemuese','kuehl':'eiweiss','brot':'weissmehl','trocken':'sonstiges','konserven':'sonstiges','tk':'gemuese','oel-gewuerze':'aromaten','sonstiges':'sonstiges'};
+const ART_DEFAULT = Lebensmittel.ART_DEFAULT;
 const PFLANZEN_ART = new Set(['gemuese','obst','huelsenfrucht','vollkorn','weissmehl','staerke','nuesse']);
 const SKALEN = [['eiweiss','Eiweiß'],['gemuese','Gemüse & Obst'],['huelsen','Hülsenfrüchte'],['kh','Kohlenhydrat-Qualität'],['fett','Fettqualität'],['zs','Zucker & Salz']];
 const ZIELE_DEFAULT = {
@@ -619,6 +634,7 @@ const S = {
   var: { standard: {}, rezepte: {} }, gruppen: new Map(),
   fokus: [], nurTreffer: false,
   vegFilter: true, zfDbQ: null,
+  lmQ: '', lmFilter: '', lmMax: 50, lmSel: null, lmEdit: null, lmDelAsk: false, lmDbQ: null, lmFehler: null,
   ed: null
 };
 {
@@ -892,186 +908,37 @@ function gruppenDatalist() {
   return `<datalist id="dlGruppen">${names.map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>`;
 }
 
-/* ---------- Nährwert-Datenbank ---------- */
-// Grundlage: Max Rubner-Institut (2025), Bundeslebensmittelschlüssel (BLS) 4.0, Lizenz CC BY 4.0.
-// Die Datei bls.json liegt neben der Seite und wird erst bei der ersten Suche geladen.
-// Weitere Quellen, etwa Open Food Facts für Barcodes in einer eigenen App, liefern Einträge
-// in derselben Form {code, name, kcal, protein, kh, zucker, fett, gesFett, ballaststoffe, salz, omega3}.
+/* ---------- Lebensmittel-Datenbank ---------- */
+// Steht in lebensmittel.js: der Bundeslebensmittelschlüssel (BLS) 4.0 aus bls.json und eigene Lebensmittel,
+// beides lokal im Browser gespeichert. Max Rubner-Institut (2025), Lizenz CC BY 4.0.
 const BLS_HINWEIS = 'Quelle: Max Rubner-Institut (2025), <a href="https://www.blsdb.de/" target="_blank" rel="noopener">Bundeslebensmittelschlüssel 4.0</a>, Lizenz <a href="https://creativecommons.org/licenses/by/4.0/deed.de" target="_blank" rel="noopener">CC BY 4.0</a>. Werte pro 100 g, gerundet.';
-const NW_FELDER = ['kcal', 'protein', 'kh', 'zucker', 'fett', 'gesFett', 'ballaststoffe', 'salz', 'omega3'];
-const BLS = { status: 'leer', daten: [], byCode: new Map(), gruppen: {}, laden: null };
-function normTxt(s) { return String(s || '').toLowerCase().replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss').normalize('NFD').replace(/[̀-ͯ]/g, ''); }
-function suchEintrag(o) {
-  const n = normTxt(o.name);
-  o.n = n; o.ns = n.replace(/[^a-z0-9]/g, ''); o.w = n.split(/[^a-z0-9]+/).filter(Boolean);
-  o.w2 = o.w.slice(0, -1).map((x, i) => x + o.w[i + 1]);
-  return o;
-}
-function blsLaden() {
-  if (BLS.status === 'ok') return Promise.resolve(BLS);
-  if (BLS.laden) return BLS.laden;
-  BLS.status = 'laedt';
-  BLS.laden = fetch('bls.json').then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(j => {
-    const sp = j.spalten;
-    BLS.gruppen = j.gruppen || {};
-    BLS.daten = j.daten.map(a => { const o = {}; sp.forEach((k, i) => { o[k] = a[i]; }); return suchEintrag(o); });
-    BLS.byCode = new Map(BLS.daten.map(o => [o.code, o]));
-    BLS.status = 'ok'; BLS.laden = null;
-    return BLS;
-  }).catch(e => { BLS.status = 'fehler'; BLS.laden = null; throw e; });
-  return BLS.laden;
-}
-const SYN = {
-  brokkoli: ['broccoli'], ei: ['huhnerei'], eier: ['huhnerei'], zwiebel: ['speisezwiebel'], zwiebeln: ['speisezwiebel'], paprika: ['gemusepaprika'],
-  nudel: ['teigwaren'], nudeln: ['teigwaren'], pasta: ['teigwaren'], spaghetti: ['teigwaren'], penne: ['teigwaren'], fusilli: ['teigwaren'], makkaroni: ['teigwaren'],
-  vollkornnudeln: ['vollkornteigwaren'], vollkornspaghetti: ['vollkornteigwaren'], vollkornpasta: ['vollkornteigwaren'],
-  vollkornreis: ['reis unpoliert'], naturreis: ['reis unpoliert'], basmati: ['reis poliert'], basmatireis: ['reis poliert'],
-  wrap: ['weizentortilla'], wraps: ['weizentortilla'], tortilla: ['weizentortilla'], tortillas: ['weizentortilla'],
-  hafermilch: ['haferdrink'], sojamilch: ['sojadrink'], mandelmilch: ['mandeldrink'],
-  frischkase: ['frischkasezubereitung'], bruhe: ['bouillon'], kartoffeln: ['kartoffel']
-};
-const ZUB = ['gekocht', 'gebraten', 'gebacken', 'gedunstet', 'gegrillt', 'geschmort', 'getrocknet', 'tiefgefroren', 'konserve', 'gegart', 'frittiert', 'gedampft', 'gargezogen', 'abgetropft'];
-const FLEISCH = /(fleisch|speck|schinken|hahnchen|huhn|pute|rind|schwein|kalb|lamm|hammel|wurst|salami|fisch|lachs|thunfisch|hering|garnele|krabbe|muschel|gelatine)/;
-const KEIN_FLEISCH = /(vegetarisch|vegan|fruchtfleisch|fleischtomate|huhnerei)/;
-function istFleisch(o) { return !!o.code && (/^[TUVW]/.test(o.code) || /^Y[0-6]/.test(o.code) || (FLEISCH.test(o.n) && !KEIN_FLEISCH.test(o.n))); }
-// Vorsilben, die am Lebensmittel nichts ändern: Babyspinat → Spinat, Kirschtomaten → Tomaten
-const VORSILBEN = ['baby', 'kirsch', 'cocktail', 'cherry', 'rispen', 'strauch', 'natur', 'bio', 'mini', 'jung', 'frisch'];
-function stammVarianten(t) {
-  const basis = [t];
-  for (const p of VORSILBEN) if (t.startsWith(p) && t.length - p.length >= 4) basis.push(t.slice(p.length));
-  const v = new Set();
-  for (const b of basis) {
-    v.add(b); (SYN[b] || []).forEach(x => v.add(x));
-    if (b.length >= 4) for (const suf of ['en', 'n', 'e', 's']) if (b.endsWith(suf) && b.length - suf.length >= 3) { const st = b.slice(0, -suf.length); v.add(st); (SYN[st] || []).forEach(x => v.add(x)); }
-  }
-  return [...v];
-}
-// Beiwörter, die fehlen dürfen, wenn sonst nichts passt: „Tofu natur“ findet Tofu, „Rote Zwiebel“ findet Zwiebel
-const SCHWACH = new Set(['natur', 'light', 'leicht', 'bio', 'frisch', 'frische', 'frischer', 'rot', 'rote', 'roter', 'rotes', 'grun', 'grune', 'gruner', 'gelb', 'gelbe', 'weiss', 'weisse', 'schwarz', 'schwarze', 'klein', 'kleine', 'gross', 'grosse', 'fein', 'mild', 'extra', 'griechisch', 'griechische', 'griechischer', 'gehackt', 'gehackte', 'passiert', 'passierte', 'geschalt', 'geschalte', 'abgetropft', 'ungesusst', 'vegan', 'vegane', 'veganer', 'vegetarisch', 'vegetarische', 'mager', 'tk']);
-function sucheIn(items, query, opts = {}) {
-  const toks = normTxt(query).split(/[^a-z0-9]+/).filter(t => t.length >= 2);
-  if (!toks.length) return [];
-  const res = sucheLauf(items, toks, opts, false);
-  return res.length || !toks.some(t => SCHWACH.has(t)) ? res : sucheLauf(items, toks, opts, true);
-}
-function sucheLauf(items, toks, { max = 8, veg = false } = {}, locker) {
-  const tv = toks.map(stammVarianten);
-  const zubQ = toks.some(t => t.length >= 4 && ZUB.some(z => z.startsWith(t.slice(0, 5))));
-  const out = [];
-  for (const it of items) {
-    if (veg && istFleisch(it)) continue;
-    let s = 0, treffer = 0, ok = true;
-    for (const [ti, vars] of tv.entries()) {
-      let best = 0;
-      for (const v of vars) {
-        const vk = v.replace(/[^a-z0-9]/g, '');
-        if (it.w.includes(v) || it.w2.includes(vk)) { best = 5.5; break; }
-        if (it.w.some(w => w.startsWith(v)) || (vk.length >= 4 && it.ns.startsWith(vk))) best = Math.max(best, 3);
-        else if (vk.length >= 4 && (it.n.includes(v) || it.ns.includes(vk))) best = Math.max(best, 1.5);
-      }
-      if (best) { treffer++; s += best; }
-      else if (locker && SCHWACH.has(toks[ti])) s -= 1.5;
-      else { ok = false; break; }
-    }
-    if (!ok || !treffer) continue;
-    if (tv.some(vars => vars.some(v => it.n.startsWith(v) || it.ns.startsWith(v.replace(/[^a-z0-9]/g, ''))))) s += 2;
-    if (!zubQ) { if (it.w.includes('roh')) s += 1.5; if (it.w.some(w => ZUB.includes(w))) s -= 0.8; }
-    if (it.code) { const g = it.code[0]; if (g === 'X' || g === 'Y') s -= 2.5; else if (g === 'D' || g === 'N' || g === 'P') s -= 1; }
-    s -= it.n.length * 0.012;
-    if (s >= 1) out.push([s, it]);
-  }
-  out.sort((a, b) => b[0] - a[0]);
-  return out.slice(0, max).map(x => x[1]);
-}
-// Abteilung und Art aus BLS-Code und Namen ableiten. Der Code beginnt mit der Hauptgruppe, z. B. G = Gemüse.
-function blsZuordnung(o) {
-  const g1 = o.code[0], g2 = o.code.slice(0, 2), nm = o.n;
-  const has = (...w) => w.some(x => nm.includes(x));
-  let kategorie = 'sonstiges', art = 'sonstiges', basic = false, zz = false, trocken = false;
-  switch (g1) {
-    case 'B': kategorie = 'brot'; art = (g2 === 'B1' || g2 === 'B4' || has('vollkorn')) ? 'vollkorn' : 'weissmehl'; break;
-    case 'C':
-      kategorie = 'trocken';
-      if (has('drink')) { kategorie = 'kuehl'; art = 'sonstiges'; }
-      else if (g2 === 'C6') art = 'sonstiges';
-      else if (has('vollkorn', 'ganzes korn', 'flocken', 'kleie', 'quinoa', 'amaranth', 'buchweizen', 'hirse', 'unpoliert', 'bulgur', 'grunkern')) art = 'vollkorn';
-      else art = 'weissmehl';
-      if (has('gesusst', 'zucker')) zz = true;
-      break;
-    case 'D': kategorie = 'brot'; zz = true; break;
-    case 'E':
-      if (g2 === 'E1') { kategorie = 'kuehl'; art = 'eiweiss'; }
-      else { kategorie = 'trocken'; art = (g2 === 'E5' || g2 === 'E7' || has('vollkorn')) ? 'vollkorn' : 'weissmehl'; }
-      break;
-    case 'F':
-      kategorie = 'obst-gemuese'; art = 'obst';
-      if (g2 === 'F8' || g2 === 'F9') art = 'sonstiges';
-      if (has('saft', 'nektar', 'sirup')) { art = 'sonstiges'; kategorie = 'sonstiges'; zz = true; }
-      if (has('gezuckert', 'gesusst', 'konfiture', 'marmelade', 'kandiert')) zz = true;
-      if (has('zitrone', 'limette') && !has('saft')) art = 'aromaten';
-      if (has('konserve')) kategorie = 'konserven';
-      if (has('getrocknet')) kategorie = 'trocken';
-      if (has('tiefgefroren')) kategorie = 'tk';
-      break;
-    case 'G':
-      kategorie = 'obst-gemuese'; art = g2 === 'G9' ? 'sonstiges' : 'gemuese';
-      if (has('petersilienblatt', 'schnittlauch', 'basilikum', 'dill', 'koriander', 'minze', 'rosmarin', 'thymian', 'salbei', 'kresse', 'knoblauch', 'kerbel', 'liebstockel', 'estragon', 'barlauch', 'majoran')) art = 'aromaten';
-      if (has('saft')) art = 'sonstiges';
-      if (g2 === 'G7' && has('reif')) { art = 'huelsenfrucht'; kategorie = 'trocken'; trocken = !has('gekocht', 'gegart', 'konserve', 'mehl'); }
-      if (has('konserve')) kategorie = 'konserven';
-      if (has('getrocknet')) kategorie = 'trocken';
-      if (has('tiefgefroren')) kategorie = 'tk';
-      break;
-    case 'H':
-      if (g2 === 'H7' || g2 === 'H9') { art = 'huelsenfrucht'; kategorie = g2 === 'H9' ? 'konserven' : 'trocken'; trocken = g2 === 'H7' && !has('gekocht', 'gegart', 'konserve', 'mehl'); }
-      else if (g2 === 'H6') { art = 'gemuese'; kategorie = 'obst-gemuese'; }
-      else if (has('tofu', 'tempeh', 'seitan', 'drink', 'joghurtalternative')) { art = (+o.protein || 0) >= 2.5 ? 'eiweiss' : 'sonstiges'; kategorie = 'kuehl'; }
-      else { art = 'nuesse'; kategorie = 'trocken'; }
-      break;
-    case 'K':
-      if (g2 === 'K7' || g2 === 'K8') { art = 'gemuese'; kategorie = 'obst-gemuese'; }
-      else { art = 'staerke'; kategorie = (g2 === 'K1' || g2 === 'K4') ? 'obst-gemuese' : 'kuehl'; }
-      if (has('tiefgefroren')) kategorie = 'tk';
-      if (has('pulver', 'trockenprodukt')) kategorie = 'trocken';
-      break;
-    case 'M':
-      kategorie = has('pulver') ? 'trocken' : 'kuehl';
-      art = ((+o.fett || 0) >= 20 && (+o.protein || 0) < 8) ? 'fett' : 'eiweiss';
-      if (has('gesusst', 'fruchtzubereitung')) zz = true;
-      break;
-    case 'N': if (g2 === 'N2' || g2 === 'N3') zz = true; break;
-    case 'Q':
-      art = 'fett'; kategorie = (g2 === 'Q4' || g2 === 'Q6') ? 'kuehl' : (g2 === 'Q9' ? 'konserven' : 'oel-gewuerze');
-      basic = g2 === 'Q1' || g2 === 'Q2' || g2 === 'Q3';
-      break;
-    case 'R':
-      kategorie = 'oel-gewuerze'; art = 'aromaten'; basic = true;
-      if (has('ketchup')) zz = true;
-      if (has('passiert', 'tomatenpuree')) { art = 'gemuese'; kategorie = 'konserven'; basic = false; }
-      if (has('roh')) { kategorie = 'obst-gemuese'; basic = false; }
-      break;
-    case 'S':
-      art = g2 === 'S1' ? 'suess' : 'sonstiges'; zz = g2 !== 'S1';
-      kategorie = g2 === 'S2' ? 'tk' : (g2 === 'S1' ? 'oel-gewuerze' : 'sonstiges');
-      basic = g2 === 'S1' && has('zucker');
-      break;
-    case 'T': case 'U': case 'V': case 'W': kategorie = has('tiefgefroren') ? 'tk' : 'kuehl'; art = 'eiweiss'; break;
-    default: break;
-  }
-  return { kategorie, art, basic, zuckerZugesetzt: zz, trocken };
-}
-function kurzName(name) {
-  return String(name).replace(/\s*\([^)]*\)/g, '').replace(/,?\s+roh$/i, '').replace(/\s{2,}/g, ' ').replace(/[,\s]+$/, '').trim();
-}
-function blsAnwenden(d, o) {
-  const z = blsZuordnung(o);
+const NW_FELDER = Lebensmittel.NW_FELDER;
+const { suchEintrag, sucheIn, kurzName } = Lebensmittel;
+const LM = Lebensmittel.erstellen();
+// Werte eines Lebensmittels in ein Formular übernehmen (Zutat, Rezeptzeile oder eigenes Lebensmittel)
+function lmAnwenden(d, o) {
   for (const k of NW_FELDER) d[k] = o[k] == null ? '' : String(o[k]).replace('.', ',');
-  d.kategorie = z.kategorie; d.art = z.art; d.artTouched = true;
-  d.basic = z.basic; d.zuckerZugesetzt = z.zuckerZugesetzt; d.trocken = z.trocken;
-  d.quelle = `BLS 4.0 · ${o.code} · ${o.name}`;
+  d.kategorie = o.kategorie; d.art = o.art; d.artTouched = true;
+  d.basic = !!o.basic; d.zuckerZugesetzt = !!o.zuckerZugesetzt; d.trocken = !!o.trocken;
+  for (const k of ['gProStk', 'gProEL', 'dichte']) if (hat(o[k])) d[k] = String(o[k]).replace('.', ',');
+  if (o.stkName) d.stkName = o.stkName;
+  d.quelle = o.herkunft === 'bls' ? `BLS 4.0 · ${o.code} · ${o.name}`
+    : o.herkunft === 'eigen' ? `Eigenes Lebensmittel · ${Lebensmittel.titel(o)}`
+    : `${o.quelle || 'Open Food Facts'} · ${Lebensmittel.titel(o)}`;
+}
+const lmVorschlagName = o => o.herkunft === 'bls' ? (kurzName(o.name) || o.name) : o.name;
+// Suche für Vorschläge in Formularen. Findet ein Produktname wie „Haferflocken zart“ nichts,
+// werden hinten Wörter weggelassen, zuletzt zählt das längste Wort allein.
+function vorschlaegeSuchen(q, opts) {
+  let hits = LM.suche(q, opts);
+  const w = q.split(/\s+/).filter(x => x.length >= 3);
+  for (let n = w.length - 1; !hits.length && n >= 1; n--) hits = LM.suche(w.slice(0, n).join(' '), opts);
+  for (const x of [...w].sort((a, b) => b.length - a.length)) { if (hits.length) break; hits = LM.suche(x, opts); }
+  return hits;
 }
 function hitHtml(o) {
-  return `<li><button type="button" class="dbs-hit" data-bls="${esc(o.code)}"><span class="dbs-name">${esc(o.name)}</span><span class="dbs-meta">${esc(BLS.gruppen[o.code.slice(0, 2)] || '')} · ${num(o.kcal)} kcal · ${num(o.protein || 0, 1)} g Eiweiß</span></button></li>`;
+  const wo = o.herkunft === 'eigen' ? ['Eigenes Lebensmittel', o.marke] : [LM.gruppeName(o)];
+  return `<li><button type="button" class="dbs-hit" data-lm="${esc(o.id)}"><span class="dbs-name">${esc(o.name)}</span><span class="dbs-meta">${esc(wo.filter(Boolean).join(' · '))} · ${num(o.kcal)} kcal · ${num(o.protein || 0, 1)} g Eiweiß</span></button></li>`;
 }
 function scorePill(pr) {
   if (!pr || !S.ziele.gesamtZeigen) return '';
@@ -1522,6 +1389,7 @@ function go(view, id) {
   S.planForm = neuesPlanForm();
   S.delAsk = false; S.nwAsk = false; S.planEdit = null;
   if (view !== 'zutaten') { S.zEdit = null; S.zDelAsk = false; }
+  if (view !== 'lebensmittel') { S.lmEdit = null; S.lmDelAsk = false; }
   render();
   window.scrollTo(0, 0);
   try {
@@ -1536,6 +1404,7 @@ function render() {
   if (S.view === 'plan') return viewPlan();
   if (S.view === 'einkauf') return viewEinkauf();
   if (S.view === 'zutaten') return viewZutaten();
+  if (S.view === 'lebensmittel') return viewLebensmittel();
   if (S.view === 'ziele') return viewZiele();
   if (S.view === 'editor') return viewEditor();
 }
@@ -1549,12 +1418,13 @@ function refresh(kind) {
     case 'plan': if (kind !== 'liste' && !S.planEdit && !imFormular('#pa')) viewPlan(); break;
     case 'einkauf': updEinkauf(); break;
     case 'zutaten': if (kind === 'z' || kind === 'r' || kind === 'var') updZutaten(); break;
+    case 'lebensmittel': if (kind === 'z' && !S.lmEdit) renderLmPanel(); break;
     case 'editor': if (kind === 'z') { updDatalist(); updPreview(); } else if (kind === 'ziele') updPreview(); break;
     default: break;
   }
 }
 function statusBlock() {
-  if (S.dbState === 'none') return `<div class="notice"><strong>Der Speicher ist hier nicht verbunden.</strong> Öffne das Kochbuch über den Link in Claude, dann erscheinen deine Rezepte, der Wochenplan und die Einkaufsliste.</div>`;
+  if (S.dbState === 'none') return `<div class="notice"><strong>Der Speicher ist hier nicht verbunden.</strong> Öffne das Kochbuch über den Link in Claude, dann erscheinen deine Rezepte, der Wochenplan und die Einkaufsliste. Die <button type="button" class="link" data-go="lebensmittel">Lebensmittel-Datenbank</button> funktioniert auch so.</div>`;
   if (!S.loadedR || !S.loadedZ) return `<p class="loading">Rezepte werden geladen …</p>`;
   return '';
 }
@@ -2367,9 +2237,11 @@ function renderZForm() {
       <div class="dbs-top">
         <label for="zfDbQ">Aus der Nährwert-Datenbank übernehmen<input id="zfDbQ" type="search" value="${esc(S.zfDbQ ?? d.name)}" placeholder="z. B. Hokkaido, Linse rot, Skyr" autocomplete="off"></label>
         <label class="check" for="zfDbVeg"><input id="zfDbVeg" type="checkbox" ${S.vegFilter ? 'checked' : ''}> Fleisch &amp; Fisch ausblenden</label>
+        <button class="btn" type="button" id="zfScan">Barcode scannen</button>
       </div>
       <ul class="dbs-list" id="zfDbList"></ul>
       ${d.quelle ? `<p class="hint">Übernommen: ${esc(d.quelle)}. Bei Markenprodukten lieber die Werte von der Packung nehmen.</p>` : ''}
+      ${String(d.quelle || '').startsWith('Open Food Facts') ? `<p class="dbs-src">${OFF_HINWEIS}</p>` : ''}
       <p class="dbs-src">${BLS_HINWEIS}</p>
     </div>
     <div class="form-grid">
@@ -2394,27 +2266,35 @@ function renderZForm() {
   </form>`;
   const zf = $('#zf');
   zf.addEventListener('input', e => { const k = e.target.dataset.k; if (k) d[k] = e.target.value; });
+  $('#zfScan').onclick = async () => {
+    const r = await produktPerBarcode();
+    if (!r || !r.o || S.zEdit !== ze) return;
+    if (r.ohneWerte) { if (!String(d.name).trim()) d.name = r.o.name; S.zfDbQ = r.o.name; }
+    else lmAnwenden(d, r.o);
+    if (!String(d.name).trim()) d.name = r.o.name;
+    renderZForm(); toast(r.text);
+  };
   const dbq = $('#zfDbQ'), dbl = $('#zfDbList');
   const zeigeTreffer = async () => {
     const q = dbq.value.trim();
     S.zfDbQ = dbq.value;
     if (q.length < 2) { dbl.innerHTML = ''; return; }
-    if (BLS.status !== 'ok') dbl.innerHTML = '<li class="hint">Datenbank wird geladen …</li>';
-    try { await blsLaden(); }
-    catch (err) { dbl.innerHTML = '<li class="hint">Die Nährwert-Datenbank konnte nicht geladen werden. Trag die Werte von der Packung ein.</li>'; return; }
+    if (LM.blsStatus !== 'ok') dbl.innerHTML = '<li class="hint">Datenbank wird geladen …</li>';
+    await LM.laden();
     if (!dbq.isConnected || dbq.value.trim() !== q) return;
-    const hits = sucheIn(BLS.daten, q, { max: 8, veg: S.vegFilter });
-    dbl.innerHTML = hits.length ? hits.map(hitHtml).join('') : '<li class="hint">Kein Treffer. Markenprodukte stehen nicht in der Datenbank, dann trag die Werte von der Packung ein.</li>';
+    const hits = vorschlaegeSuchen(q, { max: 8, veg: S.vegFilter });
+    const fehlt = LM.blsStatus === 'fehler' ? '<li class="hint">Der Bundeslebensmittelschlüssel konnte nicht geladen werden. Trag die Werte von der Packung ein.</li>' : '';
+    dbl.innerHTML = (hits.map(hitHtml).join('') + fehlt) || '<li class="hint">Kein Treffer. Markenprodukte stehen nicht im Bundeslebensmittelschlüssel: Scann den Barcode oder trag die Werte von der Packung ein.</li>';
   };
   let dbT;
   dbq.addEventListener('input', () => { clearTimeout(dbT); dbT = setTimeout(zeigeTreffer, 180); });
   dbq.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
   $('#zfDbVeg').addEventListener('change', e => { S.vegFilter = e.target.checked; LS.set('kb.vegFilter', S.vegFilter); zeigeTreffer(); });
   dbl.addEventListener('click', e => {
-    const b = e.target.closest('[data-bls]'); if (!b) return;
-    const o = BLS.byCode.get(b.dataset.bls); if (!o) return;
-    blsAnwenden(d, o);
-    if (!String(d.name).trim()) d.name = kurzName(o.name);
+    const b = e.target.closest('[data-lm]'); if (!b) return;
+    const o = LM.get(b.dataset.lm); if (!o) return;
+    lmAnwenden(d, o);
+    if (!String(d.name).trim()) d.name = lmVorschlagName(o);
     renderZForm(); toast('Werte übernommen');
   });
   zeigeTreffer();
@@ -2471,6 +2351,489 @@ function uniqueZutatId(name, extra) {
   const base = slug(name); let id = base, i = 2;
   while (S.zutaten.has(id) || extra.includes(id)) id = base + '-' + (i++);
   return id;
+}
+
+/* ---------- Barcode ---------- */
+// Lesen und Nachschlagen stehen in barcode.js. Hier sind der Scan-Dialog und die Abläufe in den Formularen.
+const OFF_HINWEIS = 'Produktdaten: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, Lizenz <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>.';
+let scanLauf = null;
+// Öffnet den Scan-Dialog mit Kamera, Foto und Eingabefeld. Gibt den Barcode zurück, null bei Abbruch.
+function barcodeLesen() {
+  if (scanLauf) return scanLauf;
+  scanLauf = new Promise(resolve => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'scan';
+    dlg.setAttribute('aria-labelledby', 'scanH');
+    dlg.innerHTML = `
+      <div class="lm-top"><h3 class="sec-title" id="scanH">Barcode scannen</h3><button class="x" type="button" id="scanZu" aria-label="Schließen">×</button></div>
+      <div class="scan-bild" id="scanBild"><video id="scanVideo" playsinline muted></video><div class="scan-rahmen" aria-hidden="true"></div></div>
+      <p class="hint" id="scanStatus" role="status">Kamera wird gestartet …</p>
+      <div class="actions"><button class="btn" type="button" id="scanLicht" hidden>Licht an</button><button class="btn" type="button" id="scanFoto">Foto wählen</button><input type="file" id="scanDatei" accept="image/*" hidden></div>
+      <form class="scan-form" id="scanForm" novalidate>
+        <label for="scanCode">Oder Nummer eintippen<input id="scanCode" type="text" inputmode="numeric" autocomplete="off" placeholder="z. B. 4001234567891"></label>
+        <button class="btn btn-primary" type="submit">Suchen</button>
+      </form>
+      <p class="err" id="scanErr" hidden></p>
+      <p class="dbs-src">Ein Handscanner am PC tippt die Nummer direkt ins Feld. Unbekannte Barcodes schlägt das Kochbuch bei Open Food Facts nach.</p>`;
+    document.body.appendChild(dlg);
+    const q = sel => dlg.querySelector(sel);
+    const status = t => { q('#scanStatus').textContent = t; };
+    const fehler = t => { const e = q('#scanErr'); e.textContent = t; e.hidden = !t; };
+    let kam = null, fertig = false, licht = false;
+    const ende = code => {
+      if (fertig) return;
+      fertig = true;
+      if (kam) kam.stoppen();
+      if (dlg.open) dlg.close();
+      dlg.remove();
+      scanLauf = null;
+      resolve(code || null);
+    };
+    dlg.addEventListener('cancel', e => { e.preventDefault(); ende(null); });
+    q('#scanZu').onclick = () => ende(null);
+    q('#scanForm').onsubmit = e => {
+      e.preventDefault();
+      const c = Barcode.normieren(q('#scanCode').value);
+      if (c) ende(c); else fehler('Das ist kein gültiger Barcode. Prüf die Ziffern, ein Barcode hat 8 oder 13.');
+    };
+    q('#scanFoto').onclick = () => q('#scanDatei').click();
+    q('#scanDatei').onchange = async e => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      fehler(''); status('Foto wird gelesen …');
+      try {
+        const { detector } = await Barcode.erkenner();
+        const c = await Barcode.bildScan(f, detector);
+        if (c) return ende(c);
+        fehler('Im Foto ist kein Barcode zu erkennen. Fotografier ihn gerade und scharf, oder tipp die Nummer ein.');
+      } catch (x) { fehler(x.message); }
+      status(kam ? 'Halte den Barcode in den Rahmen.' : '');
+    };
+    q('#scanLicht').onclick = async () => {
+      if (!kam || !kam.licht) return;
+      try { licht = !licht; await kam.licht(licht); q('#scanLicht').textContent = licht ? 'Licht aus' : 'Licht an'; } catch (x) { licht = !licht; }
+    };
+    dlg.showModal();
+    // Mit Maus und Tastatur gleich ins Feld, damit ein Handscanner losschreiben kann. Am Handy nicht, sonst kommt die Tastatur.
+    if (matchMedia('(pointer: fine)').matches) q('#scanCode').focus();
+    (async () => {
+      try {
+        const { detector } = await Barcode.erkenner();
+        if (fertig) return;
+        const k = await Barcode.kameraScan(q('#scanVideo'), {
+          detector,
+          treffer: c => { try { navigator.vibrate && navigator.vibrate(60); } catch (x) {} ende(c); },
+          fehler: () => { status('Die Kamera liest gerade nicht. Wähl ein Foto oder tipp die Nummer ein.'); }
+        });
+        if (fertig) { k.stoppen(); return; }
+        kam = k;
+        status('Halte den Barcode in den Rahmen, er wird von selbst erkannt.');
+        if (kam.licht) q('#scanLicht').hidden = false;
+      } catch (x) {
+        if (fertig) return;
+        q('#scanBild').hidden = true;
+        status(x.message);
+      }
+    })();
+  });
+  return scanLauf;
+}
+// Sucht einen Barcode zuerst in den eigenen Lebensmitteln, dann bei Open Food Facts.
+// Ergebnis: { code, eigen } oder { code, off } oder { code, fehlt: true } oder { code, fehler }
+async function barcodeNachschlagen(code) {
+  await LM.oeffnen();
+  const eigen = LM.perBarcode(code);
+  if (eigen) return { code, eigen };
+  try {
+    const off = await Barcode.offAbfragen(code);
+    return off ? { code, off } : { code, fehlt: true };
+  } catch (e) { return { code, fehler: e.message }; }
+}
+const naehrwerte = o => NW_FELDER.filter(k => hat(o[k])).length;
+// Hinweis über dem Formular, je nachdem, wie vollständig Open Food Facts das Produkt kennt
+function offHinweis(off) {
+  const name = off.name ? `„${esc(Lebensmittel.titel(off))}“` : '';
+  const n = naehrwerte(off);
+  const text = !n ? `<strong>Open Food Facts kennt ${name || 'das Produkt'}, hat aber keine Nährwerte dazu.</strong> Trag sie von der Packung ein oder übernimm unten die Werte eines ähnlichen Lebensmittels.`
+    : !hat(off.kcal) || n < 4 ? `<strong>Gefunden bei Open Food Facts${name ? ': ' + name : ''}.</strong> Dort sind nicht alle Nährwerte eingetragen. Ergänz die fehlenden von der Packung.`
+    : `<strong>Gefunden bei Open Food Facts${name ? ': ' + name : ''}.</strong> Die Nährwerte sind eingetragen. Vergleich sie mit der Packung und speichere. Danach erkennt das Kochbuch das Produkt auch ohne Internet.`;
+  return `${text} ${OFF_HINWEIS}`;
+}
+// Trägt ein gefundenes Produkt ins Formular eines eigenen Lebensmittels ein. Steht noch kein kcal-Wert drin,
+// kommen alle Nährwerte vom Produkt, sonst nur die fehlenden. Name, Marke und Packung nur, wo noch nichts steht.
+function produktEintragen(d, p) {
+  const s = v => typeof v === 'number' ? String(v).replace('.', ',') : String(v);
+  const leer = k => !String(d[k] ?? '').trim();
+  const alles = leer('kcal');
+  for (const k of ['name', 'marke', 'gProStk', 'stkName']) if (p[k] != null && p[k] !== '' && leer(k)) d[k] = s(p[k]);
+  for (const k of NW_FELDER) if (hat(p[k]) && (alles || leer(k))) d[k] = s(p[k]);
+  if (!d.artTouched && p.kategorie) { d.kategorie = p.kategorie; d.art = p.art; }
+  if (p.zuckerZugesetzt) d.zuckerZugesetzt = true;
+  if (p.trocken) d.trocken = true;
+  if (p.barcode) d.barcode = p.barcode;
+  if (p.quelle) d.quelle = p.quelle;
+}
+// Für das Zutaten-Formular: Barcode lesen und das Produkt dazu suchen. Gibt { o, text, ohneWerte } zurück, null bei Abbruch.
+async function produktPerBarcode() {
+  const code = await barcodeLesen();
+  if (!code) return null;
+  toast(`Suche ${code} …`);
+  const r = await barcodeNachschlagen(code);
+  if (r.eigen) return { o: r.eigen, text: `Werte von „${Lebensmittel.titel(r.eigen)}“ übernommen` };
+  if (r.off) {
+    if (!naehrwerte(r.off)) return { o: { ...r.off, herkunft: 'off' }, ohneWerte: true, text: 'Open Food Facts kennt das Produkt, hat aber keine Nährwerte dazu. Trag sie von der Packung ein.' };
+    return { o: { ...r.off, herkunft: 'off' }, text: 'Werte von Open Food Facts übernommen. Vergleich sie mit der Packung.' };
+  }
+  toast(r.fehler || `${code}: Dieses Produkt kennt Open Food Facts noch nicht. Trag die Werte von der Packung ein.`);
+  return { o: null };
+}
+// Reiter Lebensmittel: Bekanntes zeigen, Gefundenes zum Prüfen ins Formular, Unbekanntes mit Barcode anlegen
+async function lmScannen() {
+  const code = await barcodeLesen();
+  if (!code || S.view !== 'lebensmittel') return;
+  S.lmSel = null; S.lmEdit = null;
+  const box = $('#lmPanel');
+  if (box) { box.innerHTML = `<section class="panel"><p class="loading">Suche ${esc(code)} …</p></section>`; box.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+  const r = await barcodeNachschlagen(code);
+  if (S.view !== 'lebensmittel') return;
+  if (r.eigen) { lmZeigen(r.eigen.id); toast('Schon in deinen Lebensmitteln'); return; }
+  if (r.off) {
+    lmBearbeiten(null, lmFormDaten(r.off), offHinweis(r.off));
+    return;
+  }
+  lmBearbeiten(null, { ...leeresLm(), barcode: code }, r.fehler
+    ? `${esc(r.fehler)} Du kannst Name und Werte von der Packung eintragen.`
+    : `<strong>Barcode ${esc(code)} ist noch unbekannt.</strong> Trag Name und Werte von der Packung ein oder such unten ein ähnliches Lebensmittel. Beim nächsten Scan erkennt das Kochbuch das Produkt.`);
+}
+
+/* ---------- Ansicht: Lebensmittel ---------- */
+const LM_SCHRITT = 50;
+const LF_EXTRA = [
+  ['lfStk', 'gProStk', 'Gramm pro Stück', 'optional'],
+  ['lfStkN', 'stkName', 'Stück heißt', 'Becher, Dose, Bund …'],
+  ['lfEL', 'gProEL', 'Gramm pro EL', 'optional'],
+  ['lfDi', 'dichte', 'Dichte (g pro ml)', 'bei Flüssigem, z. B. 1,03']
+];
+function leeresLm() { return { name: '', marke: '', barcode: '', basis: '', quelle: '', kategorie: 'obst-gemuese', art: 'gemuese', artTouched: false, kcal: '', fett: '', gesFett: '', kh: '', zucker: '', ballaststoffe: '', protein: '', salz: '', omega3: '', gProStk: '', stkName: '', gProEL: '', dichte: '', basic: false, zuckerZugesetzt: false, trocken: false }; }
+// Formulardaten aus einem Lebensmittel. Aus dem BLS wird eine Kopie mit kurzem Namen, die auf dem Eintrag beruht.
+function lmFormDaten(o) {
+  const d = leeresLm();
+  for (const k of Object.keys(d)) if (o[k] !== undefined && o[k] !== null) d[k] = typeof o[k] === 'number' ? String(o[k]).replace('.', ',') : o[k];
+  d.artTouched = true;
+  if (o.herkunft === 'bls') { d.name = lmVorschlagName(o); d.basis = o.code; }
+  return d;
+}
+const lmG = v => `${num(v, v < 1 ? 2 : (v < 10 ? 1 : 0))} g`;
+function viewLebensmittel() {
+  main.innerHTML = `
+  <section class="wrap page">
+    <div class="page-h">
+      <div><h2 class="page-title">Lebensmittel</h2><p class="muted" id="lmMeta"></p></div>
+      <div class="actions"><button class="btn" id="lmScan" type="button">Barcode scannen</button><button class="btn btn-primary" id="lmNeu" type="button">Neues Lebensmittel</button></div>
+    </div>
+    <div id="lmHinweis"></div>
+    <div id="lmPanel"></div>
+    <div class="toolbar">
+      <label class="search"><span class="sr">Lebensmittel suchen</span><input type="search" id="lmQ" placeholder="Suchen, z. B. Haferflocken oder Skyr" autocomplete="off" value="${esc(S.lmQ)}"></label>
+      <label class="sortl"><span class="sr">Gruppe</span><select id="lmFilter">
+        <option value="">Alle Lebensmittel</option><option value="eigen">Eigene Lebensmittel</option><option value="bls">Nur Bundeslebensmittelschlüssel</option>
+        <optgroup label="Gruppen im Bundeslebensmittelschlüssel">${Lebensmittel.HAUPTGRUPPEN.map(([k, n]) => `<option value="${k}">${esc(n)}</option>`).join('')}</optgroup>
+      </select></label>
+      <label class="check" for="lmVeg"><input id="lmVeg" type="checkbox" ${S.vegFilter ? 'checked' : ''}> Fleisch &amp; Fisch ausblenden</label>
+    </div>
+    <div class="table-wrap"><table class="ztab lmtab" id="lmTab"></table></div>
+    <div class="actions" id="lmMehr"></div>
+    <section class="panel">
+      <h3 class="preview-h">Sicherung</h3>
+      <p class="hint">Eigene Lebensmittel liegen nur in diesem Browser. Mit einer Sicherung nimmst du sie auf ein anderes Gerät mit oder holst sie zurück, falls die Browserdaten gelöscht werden.</p>
+      <div class="actions"><button class="btn" id="lmExport" type="button">Exportieren</button><button class="btn" id="lmImportBtn" type="button">Importieren</button><input type="file" id="lmImport" accept=".json,application/json" hidden></div>
+    </section>
+    <p class="dbs-src">${BLS_HINWEIS}<br>Gescannte Produkte: ${OFF_HINWEIS}</p>
+  </section>`;
+  $('#lmFilter').value = S.lmFilter;
+  $('#lmNeu').onclick = () => lmBearbeiten(null, leeresLm());
+  $('#lmScan').onclick = lmScannen;
+  $('#lmQ').addEventListener('input', e => { S.lmQ = e.target.value; S.lmMax = LM_SCHRITT; updLmTab(); });
+  $('#lmFilter').onchange = e => { S.lmFilter = e.target.value; S.lmMax = LM_SCHRITT; updLmTab(); };
+  $('#lmVeg').onchange = e => { S.vegFilter = e.target.checked; LS.set('kb.vegFilter', S.vegFilter); S.lmMax = LM_SCHRITT; updLmTab(); };
+  $('#lmMehr').onclick = e => { if (e.target.closest('#lmMehrBtn')) { S.lmMax += LM_SCHRITT; updLmTab(); } };
+  const tab = $('#lmTab');
+  tab.addEventListener('click', e => { const tr = e.target.closest('tr[data-lm]'); if (tr) lmZeigen(tr.dataset.lm); });
+  tab.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const tr = e.target.closest('tr[data-lm]'); if (tr) lmZeigen(tr.dataset.lm); });
+  $('#lmExport').onclick = lmExportieren;
+  $('#lmImportBtn').onclick = () => $('#lmImport').click();
+  $('#lmImport').onchange = lmImportieren;
+  updLm();
+  if (LM.blsStatus !== 'ok') LM.laden().then(() => { if (S.view === 'lebensmittel') updLm(); });
+}
+function updLm() {
+  if (S.view !== 'lebensmittel' || !$('#lmTab')) return;
+  const a = LM.anzahl;
+  const eigene = a.eigen ? `${num(a.eigen)} ${a.eigen === 1 ? 'eigenes Lebensmittel' : 'eigene Lebensmittel'}` : '';
+  $('#lmMeta').textContent = LM.blsStatus === 'ok'
+    ? `${num(a.bls)} Lebensmittel aus dem Bundeslebensmittelschlüssel${eigene ? ' und ' + eigene : ''}, alle Werte pro 100 g. Die Datenbank liegt auf diesem Gerät und funktioniert auch ohne Internet.${eigene ? '' : ' Markenprodukte scannst du mit „Barcode scannen“ ein.'}`
+    : `${eigene || 'Noch keine eigenen Lebensmittel'}. Alle Werte pro 100 g.`;
+  const h = [];
+  if (LM.blsStatus === 'fehler') h.push('<div class="notice"><strong>Der Bundeslebensmittelschlüssel konnte nicht geladen werden.</strong> Die Datei bls.json muss neben der Seite liegen, und die Seite muss über einen Webserver geöffnet sein, nicht direkt als Datei. Eigene Lebensmittel gehen trotzdem.</div>');
+  if (LM.blsStatus !== 'leer' && LM.blsStatus !== 'laedt' && !LM.persistent) h.push('<div class="notice"><strong>Dieser Browser speichert hier nichts dauerhaft</strong>, etwa im privaten Fenster. Eigene Lebensmittel sind nach dem Schließen weg. Sichere sie vorher mit „Exportieren“.</div>');
+  if (S.lmFehler && S.lmFehler.length) h.push(`<div class="panel alert"><p><strong>Nicht importiert:</strong> ${S.lmFehler.slice(0, 8).map(f => `${esc(f.name)} (${esc(f.grund)})`).join(', ')}${S.lmFehler.length > 8 ? ` und ${S.lmFehler.length - 8} weitere` : ''}</p><div class="actions"><button class="btn-mini" type="button" id="lmFehlerOk">Ausblenden</button></div></div>`);
+  $('#lmHinweis').innerHTML = h.join('');
+  const ok = $('#lmFehlerOk'); if (ok) ok.onclick = () => { S.lmFehler = null; updLm(); };
+  if (!S.lmEdit) renderLmPanel();
+  updLmTab();
+}
+function updLmTab() {
+  const tab = $('#lmTab'); if (!tab) return;
+  const q = S.lmQ.trim(), opts = { filter: S.lmFilter, veg: S.vegFilter };
+  const laedt = LM.blsStatus === 'leer' || LM.blsStatus === 'laedt';
+  const alle = q ? LM.suche(q, { ...opts, max: S.lmMax + 1 }) : LM.liste(opts);
+  const list = alle.slice(0, S.lmMax);
+  const c = (o, k) => hat(o[k]) ? `<td class="num">${num(o[k], k === 'kcal' ? 0 : (o[k] < 1 ? 2 : 1))}</td>` : '<td class="num muted">–</td>';
+  const leer = laedt ? 'Datenbank wird geladen …'
+    : q ? `Nichts gefunden für „${esc(q)}“.${S.vegFilter ? ' Fleisch und Fisch sind ausgeblendet.' : ''} Markenprodukte scannst du mit „Barcode scannen“ ein.`
+    : S.lmFilter === 'eigen' ? 'Noch keine eigenen Lebensmittel. Scann Markenprodukte mit „Barcode scannen“ ein oder leg sie mit „Neues Lebensmittel“ an.'
+    : S.vegFilter ? 'Keine Einträge. Fleisch und Fisch sind ausgeblendet.' : 'Keine Einträge.';
+  tab.innerHTML = `<thead><tr><th scope="col" class="l">Lebensmittel</th><th scope="col" class="l">Gruppe</th><th scope="col">kcal</th><th scope="col">Eiweiß</th><th scope="col">KH</th><th scope="col">Fett</th><th scope="col">Ballastst.</th><th scope="col">Salz</th></tr></thead>
+  <tbody>${list.map(o => { const gr = esc(o.herkunft === 'eigen' ? KAT_NAME[o.kategorie] || '' : LM.gruppeName(o)); return `<tr data-lm="${esc(o.id)}" tabindex="0"${o.id === S.lmSel ? ' aria-current="true"' : ''}><td class="l"><strong>${esc(o.name)}</strong>${o.marke ? ` <span class="muted">${esc(o.marke)}</span>` : ''}${o.herkunft === 'eigen' ? ' <span class="tag">Eigen</span>' : ''}<span class="lm-gr">${gr}</span></td><td class="l">${gr}</td>${c(o, 'kcal')}${c(o, 'protein')}${c(o, 'kh')}${c(o, 'fett')}${c(o, 'ballaststoffe')}${c(o, 'salz')}</tr>`; }).join('') || `<tr><td colspan="8" class="muted l lm-leer">${leer}</td></tr>`}</tbody>`;
+  const rest = alle.length - list.length;
+  $('#lmMehr').innerHTML = rest > 0 ? `<button class="btn" type="button" id="lmMehrBtn">Mehr anzeigen</button><span class="hint">${q ? 'weitere Treffer' : `${num(list.length)} von ${num(alle.length)}`}</span>` : '';
+}
+function lmZeigen(id) {
+  S.lmSel = id; S.lmEdit = null; S.lmDelAsk = false;
+  renderLmPanel(); updLmTab();
+  const p = $('#lmPanel'); if (p) p.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+function lmBearbeiten(id, d, hinweis = '') {
+  S.lmEdit = { id, d, hinweis }; S.lmDelAsk = false; S.lmDbQ = null;
+  renderLmPanel();
+  const p = $('#lmPanel'); if (p) p.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  const f = $(d.name ? '#lfName' : '#lfDbQ'); if (f) f.focus({ preventScroll: true });
+}
+function renderLmPanel() {
+  const box = $('#lmPanel'); if (!box) return;
+  if (S.lmEdit) return renderLmForm();
+  const o = S.lmSel ? LM.get(S.lmSel) : null;
+  box.innerHTML = o ? lmDetailHtml(o) : '';
+  if (!o) return;
+  $('#lmZu').onclick = () => { S.lmSel = null; renderLmPanel(); updLmTab(); };
+  const zut = $('#lmZutat');
+  if (zut) zut.onclick = () => {
+    const zid = findeZutat(lmVorschlagName(o));
+    if (zid) { go('zutaten'); zutatOeffnen(zid); return; }
+    const d = leereZutat();
+    lmAnwenden(d, o); d.name = lmVorschlagName(o);
+    S.zEdit = { id: null, d }; S.zDelAsk = false; S.zfDbQ = null;
+    go('zutaten');
+  };
+  const kopie = $('#lmKopie'); if (kopie) kopie.onclick = () => lmBearbeiten(null, lmFormDaten(o));
+  const bea = $('#lmBea'); if (bea) bea.onclick = () => lmBearbeiten(o.id, lmFormDaten(o));
+}
+function lmDetailHtml(o) {
+  const eigen = o.herkunft === 'eigen';
+  const sub = eigen
+    ? ['Eigenes Lebensmittel', o.marke, o.barcode && `Barcode ${o.barcode}`, o.basis && `beruht auf BLS ${o.basis}`]
+    : [`BLS ${o.code}`, LM.gruppeName(o)];
+  const port = hat(o.gProStk) ? +o.gProStk : 0;
+  const reihe = (name, k, sub, f = lmG) => {
+    const z = v => hat(v) ? f(+v) : '–';
+    return `<tr${sub ? ' class="sub"' : ''}><th scope="row">${name}</th><td>${z(o[k])}</td>${port ? `<td>${z(hat(o[k]) ? o[k] * port / 100 : null)}</td>` : ''}</tr>`;
+  };
+  const energie = v => `${num(v * 4.184)} kJ<br>${num(v)} kcal`;
+  const merkmale = [o.basic && 'Basic, die Einkaufsliste blendet es aus', o.zuckerZugesetzt && 'Zucker zählt als zugesetzt', o.trocken && 'getrocknet, gegart 2,5-fach'].filter(Boolean);
+  const umr = [port && `1 ${esc(o.stkName || 'Stück')} = ${num(port, 1)} g`, hat(o.gProEL) && `1 EL = ${num(o.gProEL, 1)} g`, hat(o.dichte) && `1 ml = ${num(o.dichte, 2)} g`].filter(Boolean);
+  const zid = findeZutat(lmVorschlagName(o));
+  const zutatBtn = S.dbState === 'none'
+    ? '<span class="hint">Als Zutat übernehmen geht, sobald das Kochbuch mit seinem Speicher in Claude verbunden ist.</span>'
+    : `<button class="btn btn-primary" type="button" id="lmZutat">${zid ? 'Zutat öffnen' : 'Als Zutat übernehmen'}</button>`;
+  return `<section class="panel" aria-label="${esc(o.name)}">
+    <div class="lm-top">
+      <div><h3 class="sec-title">${esc(o.name)}</h3><p class="hint">${esc(sub.filter(Boolean).join(' · '))}</p></div>
+      <button class="x" type="button" id="lmZu" aria-label="Schließen">×</button>
+    </div>
+    <div class="lm-grid">
+      <section class="label" aria-label="Nährwerte">
+        <div class="label-h">Nährwerte</div>
+        <table>
+          <thead><tr><th scope="col"><span class="sr">Nährstoff</span></th><th scope="col">pro 100 g</th>${port ? `<th scope="col">pro ${esc(o.stkName || 'Stück')} (${num(port)} g)</th>` : ''}</tr></thead>
+          <tbody>
+            ${reihe('Brennwert', 'kcal', false, energie)}
+            ${reihe('Fett', 'fett')}${reihe('davon gesättigte Fettsäuren', 'gesFett', true)}
+            ${reihe('Kohlenhydrate', 'kh')}${reihe('davon Zucker', 'zucker', true)}
+            ${reihe('Ballaststoffe', 'ballaststoffe')}
+            ${reihe('Eiweiß', 'protein')}
+            ${reihe('Salz', 'salz')}
+            ${reihe('Omega-3-Fettsäuren', 'omega3')}
+          </tbody>
+        </table>
+        ${mbar({ p: +o.protein || 0, k: +o.kh || 0, f: +o.fett || 0 })}
+      </section>
+      <dl class="lm-facts">
+        <dt>Abteilung</dt><dd>${esc(KAT_NAME[o.kategorie] || 'Sonstiges')}</dd>
+        <dt>Art</dt><dd>${esc(ART_NAME[o.art] || 'Sonstiges')}</dd>
+        ${merkmale.length ? `<dt>Merkmale</dt><dd>${esc(merkmale.join(', '))}</dd>` : ''}
+        ${umr.length ? `<dt>Umrechnung</dt><dd>${umr.join('<br>')}</dd>` : ''}
+        ${eigen && o.quelle ? `<dt>Quelle</dt><dd>${String(o.quelle).startsWith('Open Food Facts') && o.barcode ? `<a href="${esc(Barcode.offLink(o.barcode))}" target="_blank" rel="noopener">Open Food Facts</a>, Lizenz ODbL` : esc(o.quelle)}</dd>` : ''}
+        ${eigen ? '' : '<dt>Hinweis</dt><dd>Abteilung und Art leitet das Kochbuch aus der BLS-Gruppe ab. Bei Markenprodukten gelten die Werte von der Packung.</dd>'}
+      </dl>
+    </div>
+    <div class="actions">
+      ${zutatBtn}
+      ${eigen ? '<button class="btn" type="button" id="lmBea">Bearbeiten</button>' : '<button class="btn" type="button" id="lmKopie">Als eigenes Lebensmittel anlegen</button>'}
+    </div>
+  </section>`;
+}
+function renderLmForm() {
+  const box = $('#lmPanel'); if (!box) return;
+  const le = S.lmEdit, d = le.d;
+  const zahl = ([id, k, l]) => { const lid = id.replace(/^zf/, 'lf'); return `<label for="${lid}">${l}<input id="${lid}" data-k="${k}" type="text" inputmode="decimal" value="${esc(d[k])}"></label>`; };
+  box.innerHTML = `<form class="panel" id="lf" novalidate>
+    <h3 class="preview-h">${le.id ? 'Lebensmittel bearbeiten' : 'Neues Lebensmittel'} · Werte pro 100 g</h3>
+    ${le.hinweis ? `<div class="notice">${le.hinweis}</div>` : ''}
+    <div class="dbs">
+      <div class="dbs-top">
+        <label for="lfDbQ">Werte aus dem Bundeslebensmittelschlüssel übernehmen<input id="lfDbQ" type="search" value="${esc(S.lmDbQ ?? d.name)}" placeholder="z. B. Skyr, Linse rot, Tahini" autocomplete="off"></label>
+      </div>
+      <ul class="dbs-list" id="lfDbList"></ul>
+      ${d.basis ? `<p class="hint">Beruht auf BLS ${esc(d.basis)}${LM.get('bls:' + d.basis) ? ` · ${esc(LM.get('bls:' + d.basis).name)}` : ''}. Bei Markenprodukten lieber die Werte von der Packung nehmen.</p>` : ''}
+    </div>
+    <div class="form-grid">
+      <label for="lfName" class="wide">Name<input id="lfName" data-k="name" type="text" value="${esc(d.name)}" placeholder="z. B. Skyr Natur"></label>
+      <label for="lfMarke">Marke<input id="lfMarke" data-k="marke" type="text" value="${esc(d.marke)}" placeholder="optional"></label>
+      <label for="lfBar" class="breit">Barcode (EAN)<span class="feld-knopf"><input id="lfBar" data-k="barcode" type="text" inputmode="numeric" value="${esc(d.barcode)}" placeholder="optional"><button class="btn-mini" type="button" id="lfScan">Scannen</button></span><span class="field-hint" id="lfBarInfo" role="status">${d.barcode ? '' : 'Scannen oder eintippen, die Werte kommen dann von Open Food Facts'}</span></label>
+      <label for="lfKat">Abteilung<select id="lfKat">${KATS.map(([v, l]) => `<option value="${v}" ${d.kategorie === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label for="lfArt">Art (für die Bewertung)<select id="lfArt">${ART.map(([v, l]) => `<option value="${v}" ${d.art === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${ZF_ZAHLEN.map(zahl).join('')}
+      ${LF_EXTRA.map(([id, k, l, ph]) => `<label for="${id}">${l}<input id="${id}" data-k="${k}" type="text" ${k === 'stkName' ? '' : 'inputmode="decimal"'} value="${esc(d[k])}" placeholder="${esc(ph)}"></label>`).join('')}
+      <label class="check wide" for="lfBasic"><input id="lfBasic" data-b="basic" type="checkbox" ${d.basic ? 'checked' : ''}> Basic: habe ich meistens zu Hause</label>
+      <label class="check wide" for="lfZz"><input id="lfZz" data-b="zuckerZugesetzt" type="checkbox" ${d.zuckerZugesetzt ? 'checked' : ''}> Der Zucker darin zählt als zugesetzt, z. B. bei Saft, Ketchup oder gesüßtem Joghurt</label>
+      <label class="check wide" for="lfTr"><input id="lfTr" data-b="trocken" type="checkbox" ${d.trocken ? 'checked' : ''}> Getrocknet: Hülsenfrüchte zählen gegart 2,5-fach</label>
+    </div>
+    <p class="err" id="lfErr" hidden></p>
+    ${S.lmDelAsk ? `<div class="panel alert"><p>„${esc(d.name)}“ löschen? Zutaten, die du daraus übernommen hast, bleiben erhalten.</p><div class="actions"><button class="btn btn-danger solid" type="button" id="lfDelYes">Ja, löschen</button><button class="btn btn-ghost" type="button" id="lfDelNo">Abbrechen</button></div></div>` : ''}
+    <div class="actions">
+      <button class="btn btn-primary" type="submit" id="lfSave">Speichern</button>
+      <button class="btn btn-ghost" type="button" id="lfCancel">Abbrechen</button>
+      ${le.id ? '<button class="btn btn-ghost btn-danger" type="button" id="lfDel">Löschen</button>' : ''}
+    </div>
+  </form>`;
+  const lf = $('#lf');
+  lf.addEventListener('input', e => { const k = e.target.dataset.k; if (k) d[k] = e.target.value; });
+  lf.addEventListener('change', e => {
+    const b = e.target.dataset.b; if (b) d[b] = e.target.checked;
+    if (e.target.id === 'lfArt') { d.art = e.target.value; d.artTouched = true; }
+    if (e.target.id === 'lfKat') {
+      d.kategorie = e.target.value;
+      if (!d.artTouched) { d.art = ART_DEFAULT[d.kategorie] || 'sonstiges'; $('#lfArt').value = d.art; }
+    }
+  });
+  const dbq = $('#lfDbQ'), dbl = $('#lfDbList');
+  const zeigeTreffer = async () => {
+    const q = dbq.value.trim();
+    S.lmDbQ = dbq.value;
+    if (q.length < 2) { dbl.innerHTML = ''; return; }
+    if (LM.blsStatus !== 'ok') dbl.innerHTML = '<li class="hint">Datenbank wird geladen …</li>';
+    await LM.laden();
+    if (!dbq.isConnected || dbq.value.trim() !== q) return;
+    const hits = vorschlaegeSuchen(q, { max: 6, veg: S.vegFilter, filter: 'bls' });
+    dbl.innerHTML = hits.length ? hits.map(hitHtml).join('') : `<li class="hint">${LM.blsStatus === 'fehler' ? 'Der Bundeslebensmittelschlüssel konnte nicht geladen werden.' : 'Kein Treffer. Trag die Werte von der Packung ein.'}</li>`;
+  };
+  let dbT;
+  dbq.addEventListener('input', () => { clearTimeout(dbT); dbT = setTimeout(zeigeTreffer, 180); });
+  dbq.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+  dbl.addEventListener('click', e => {
+    const b = e.target.closest('[data-lm]'); if (!b) return;
+    const o = LM.get(b.dataset.lm); if (!o) return;
+    lmAnwenden(d, o); d.basis = o.code;
+    if (!String(d.name).trim()) d.name = lmVorschlagName(o);
+    renderLmForm(); toast('Werte übernommen');
+  });
+  // Ohne Nährwerte gleich ähnliche Lebensmittel aus dem BLS vorschlagen
+  if (!d.basis && !String(d.kcal || '').trim()) zeigeTreffer();
+  // Barcode gescannt oder eingetippt: Produkt suchen und die Werte eintragen
+  const barcodeFuellen = async code => {
+    const info = $('#lfBarInfo');
+    const anderes = LM.perBarcode(code);
+    if (anderes && anderes.id !== le.id) { info.textContent = `Diesen Barcode hat schon „${Lebensmittel.titel(anderes)}“.`; return; }
+    info.textContent = 'Suche bei Open Food Facts …';
+    let off;
+    try { off = await Barcode.offAbfragen(code); }
+    catch (x) { if (S.lmEdit === le && info.isConnected) info.textContent = x.message; return; }
+    if (S.lmEdit !== le) return;
+    if (!off) { if (info.isConnected) info.textContent = 'Open Food Facts kennt diesen Barcode noch nicht. Trag die Werte von der Packung ein.'; return; }
+    produktEintragen(d, off);
+    le.hinweis = offHinweis(off);
+    S.lmDbQ = null;
+    renderLmForm();
+  };
+  $('#lfScan').onclick = async () => {
+    const code = await barcodeLesen();
+    if (!code || S.lmEdit !== le) return;
+    d.barcode = code; $('#lfBar').value = code;
+    barcodeFuellen(code);
+  };
+  const bar = $('#lfBar');
+  // Ein Handscanner schickt nach der Nummer ein Enter, das soll nicht das Formular speichern
+  bar.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); bar.blur(); } });
+  bar.addEventListener('change', () => {
+    const info = $('#lfBarInfo');
+    const roh = String(d.barcode || '').trim();
+    if (!roh) { info.textContent = ''; return; }
+    const code = Barcode.normieren(roh);
+    if (!code) { info.textContent = 'Die Prüfziffer stimmt nicht. Vertippt?'; return; }
+    d.barcode = code; bar.value = code;
+    // Eingetippt: nur nachschlagen, solange noch keine Werte drinstehen
+    if (!String(d.kcal || '').trim()) barcodeFuellen(code);
+    else info.textContent = '';
+  });
+  const zu = () => { S.lmEdit = null; S.lmDelAsk = false; renderLmPanel(); };
+  $('#lfCancel').onclick = zu;
+  const del = $('#lfDel'); if (del) del.onclick = () => { S.lmDelAsk = true; renderLmForm(); };
+  if (S.lmDelAsk) {
+    $('#lfDelNo').onclick = () => { S.lmDelAsk = false; renderLmForm(); };
+    $('#lfDelYes').onclick = async () => {
+      try { await LM.loeschen(le.id); toast(`${d.name} gelöscht`); S.lmSel = null; zu(); }
+      catch (x) { toast(x.message); }
+    };
+  }
+  lf.onsubmit = async e => {
+    e.preventDefault();
+    const err = $('#lfErr'), btn = $('#lfSave');
+    err.hidden = true; btn.disabled = true;
+    try {
+      const o = await LM.speichern(d, le.id);
+      toast(`${o.name} gespeichert`);
+      S.lmSel = o.id; zu(); updLmTab();
+    } catch (x) {
+      btn.disabled = false;
+      err.textContent = x.message; err.hidden = false;
+    }
+  };
+}
+function lmExportieren() {
+  const data = LM.exportieren();
+  if (!data.anzahl) return toast('Noch keine eigenen Lebensmittel zum Sichern.');
+  try {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `kochbuch-lebensmittel-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(`${data.anzahl} Lebensmittel exportiert`);
+  } catch (e) { toast('Der Browser lässt hier keinen Download zu.'); }
+}
+async function lmImportieren(e) {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  if (f.size > 5e6) return toast('Die Datei ist zu groß für eine Sicherung.');
+  try {
+    const r = await LM.importieren(await f.text());
+    const teile = [r.neu && `${r.neu} neu`, r.aktualisiert && `${r.aktualisiert} aktualisiert`, r.unveraendert && `${r.unveraendert} schon vorhanden`, r.fehler.length && `${r.fehler.length} übersprungen`].filter(Boolean);
+    toast('Import: ' + (teile.join(', ') || 'keine Lebensmittel in der Datei'));
+    S.lmFehler = r.fehler.length ? r.fehler : null;
+    updLm();
+  } catch (x) { toast(x.message); }
 }
 
 /* ---------- Ansicht: Ziele ---------- */
@@ -2630,10 +2993,10 @@ function viewEditor() {
       if (r && z) { r.name = z.name; renderRows(); updPreview(); }
       return;
     }
-    const hit = e.target.closest('[data-bls]');
+    const hit = e.target.closest('[data-lm]');
     if (hit) {
-      const r = ed.rows.find(x => x.key === hit.closest('[data-row]').dataset.row), o = BLS.byCode.get(hit.dataset.bls);
-      if (r && o) { blsAnwenden(r.neu, o); renderRows(); updPreview(); toast('Werte übernommen'); }
+      const r = ed.rows.find(x => x.key === hit.closest('[data-row]').dataset.row), o = LM.get(hit.dataset.lm);
+      if (r && o) { lmAnwenden(r.neu, o); renderRows(); updPreview(); toast('Werte übernommen'); }
       return;
     }
     const b = e.target.closest('[data-rdel]'); if (!b) return;
@@ -2643,7 +3006,7 @@ function viewEditor() {
   });
   $('#edForm').onsubmit = e => { e.preventDefault(); rezeptSpeichern(); };
   renderRows(); updDatalist(); updPreview();
-  blsLaden().catch(() => {});
+  LM.laden();
 }
 function renderRows() {
   const ed = S.ed;
@@ -2699,10 +3062,11 @@ async function editorVorschlaege(r) {
   if (name.length < 3 || findeZutat(name)) { box.innerHTML = ''; return; }
   const eigene = sucheIn([...S.zutaten.values()].map(z => suchEintrag({ id: z.id, name: z.name })), name, { max: 3 });
   const eigenHtml = eigene.length ? `<p class="hint">Meintest du eine Zutat, die du schon hast?</p><div class="opts">${eigene.map(z => `<button type="button" class="opt" data-own="${esc(z.id)}">${esc(z.name)}</button>`).join('')}</div>` : '';
-  if (BLS.status !== 'ok') box.innerHTML = eigenHtml + '<p class="hint">Nährwert-Datenbank wird geladen …</p>';
-  try { await blsLaden(); } catch (e) { box.innerHTML = eigenHtml; return; }
+  if (LM.blsStatus !== 'ok') box.innerHTML = eigenHtml + '<p class="hint">Nährwert-Datenbank wird geladen …</p>';
+  await LM.laden();
   if (!box.isConnected || r.name.trim() !== name) return;
-  const hits = sucheIn(BLS.daten, name, { max: 4, veg: S.vegFilter });
+  const hits = LM.suche(name, { max: 4, veg: S.vegFilter });
+  if (!hits.length && LM.blsStatus === 'fehler') { box.innerHTML = eigenHtml; return; }
   box.innerHTML = eigenHtml + (hits.length ? `<p class="hint">Werte aus der Nährwert-Datenbank übernehmen:</p><ul class="dbs-list">${hits.map(hitHtml).join('')}</ul><p class="dbs-src">${BLS_HINWEIS}</p>` : '<p class="hint">Kein Treffer in der Nährwert-Datenbank.</p>');
 }
 function updDatalist() {
@@ -2808,6 +3172,9 @@ $('#btnNeu').onclick = neuesRezept;
   else if (h.startsWith('r-')) { S.view = 'detail'; S.detailId = h.slice(2); }
 })();
 render();
+// Die Lebensmittel-Datenbank meldet Änderungen selbst, unabhängig vom Speicher in Claude
+LM.abonnieren(updLm);
+LM.oeffnen().then(updLm);
 
 function onErr(e) {
   if (e && e.code === 'revoked') toast('Der Speicher ist nicht mehr erreichbar.');
