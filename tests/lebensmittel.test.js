@@ -112,9 +112,11 @@ test('prüft die Eingaben', () => {
   assert.throws(() => L.pruefen({ name: 'X', kcal: 100, kh: 2, zucker: 5 }), /Zucker/);
   assert.throws(() => L.pruefen({ name: 'X', kcal: 100, protein: 40, kh: 40, fett: 40 }), /zusammen/);
   assert.throws(() => L.pruefen({ name: 'X', kcal: 100, barcode: '12ab' }), /Barcode/);
+  assert.throws(() => L.pruefen({ name: 'X', kcal: 100, barcode: '4006040001233' }), /Prüfziffer/);
+  assert.equal(L.pruefen({ name: 'X', kcal: 100, barcode: '036000291452' }).barcode, '0036000291452', 'UPC-A wird zu EAN-13');
   assert.throws(() => L.pruefen({ name: 'X', kcal: 100, dichte: 9 }), /Dichte/);
-  const lm = L.pruefen({ name: '  Linsen   rot ', kcal: '330', kategorie: 'trocken', art: 'unbekannt', trocken: true, basic: 'ja', barcode: '4006040 001234' });
-  assert.deepEqual(lm, { name: 'Linsen rot', barcode: '4006040001234', kategorie: 'trocken', art: 'sonstiges', kcal: 330, protein: 0, kh: 0, fett: 0, trocken: true });
+  const lm = L.pruefen({ name: '  Linsen   rot ', kcal: '330', kategorie: 'trocken', art: 'unbekannt', trocken: true, basic: 'ja', barcode: '4006040 001232' });
+  assert.deepEqual(lm, { name: 'Linsen rot', barcode: '4006040001232', kategorie: 'trocken', art: 'sonstiges', kcal: 330, protein: 0, kh: 0, fett: 0, trocken: true });
 });
 
 test('jeder BLS-Eintrag lässt sich als eigenes Lebensmittel übernehmen', async () => {

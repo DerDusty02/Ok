@@ -248,6 +248,16 @@ function zahl(v) {
 }
 const deZahl = x => String(x).replace('.', ',');
 const text = (v, max) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, max);
+// Prüfziffer von EAN-8, UPC-A, EAN-13 und GTIN-14
+function gtinGueltig(code) {
+  const s = String(code == null ? '' : code);
+  if (!/^(\d{8}|\d{12,14})$/.test(s)) return false;
+  let summe = 0;
+  for (let i = s.length - 2, f = 3; i >= 0; i--, f = 4 - f) summe += +s[i] * f;
+  return (10 - summe % 10) % 10 === +s[s.length - 1];
+}
+// Führende Nullen ändern nichts: UPC-A 012345678905 ist dasselbe Produkt wie EAN-13 0012345678905
+const gtinSchluessel = c => String(c || '').replace(/^0+/, '');
 const titel = o => o.marke ? `${o.name} (${o.marke})` : o.name;
 const schluessel = o => normTxt(o.name).trim() + '|' + normTxt(o.marke || '').trim();
 const iso = v => typeof v === 'string' && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null;
@@ -261,9 +271,12 @@ function pruefen(roh) {
   const lm = { name };
   const marke = text(roh.marke, 60);
   if (marke) lm.marke = marke;
-  const barcode = String(roh.barcode == null ? '' : roh.barcode).replace(/\s/g, '');
+  let barcode = String(roh.barcode == null ? '' : roh.barcode).replace(/[\s-]/g, '');
   if (barcode) {
-    if (!/^\d{8,14}$/.test(barcode)) throw new Error('Der Barcode besteht aus 8 bis 14 Ziffern.');
+    if (!/^(\d{8}|\d{12,14})$/.test(barcode)) throw new Error('Ein Barcode hat 8 oder 13 Ziffern.');
+    if (!gtinGueltig(barcode)) throw new Error('Die Prüfziffer des Barcodes stimmt nicht. Vertippt?');
+    if (barcode.length === 12) barcode = '0' + barcode;
+    if (barcode.length === 14 && barcode[0] === '0') barcode = barcode.slice(1);
     lm.barcode = barcode;
   }
   const basis = text(roh.basis, 10);
@@ -295,6 +308,9 @@ function pruefen(roh) {
   }
   const sn = text(roh.stkName, 20);
   if (sn) lm.stkName = sn;
+  // Woher die Werte stammen, z. B. „Open Food Facts · 4001234567890“
+  const quelle = text(roh.quelle, 140);
+  if (quelle) lm.quelle = quelle;
   for (const k of ['basic', 'zuckerZugesetzt', 'trocken']) if (roh[k] === true) lm[k] = true;
   return lm;
 }
@@ -454,6 +470,12 @@ function erstellen({ speicher, blsText, timeout } = {}) {
     for (const e of st.eigene.values()) if (e.id !== id && schluessel(e) === k) return e;
     return null;
   }
+  function perBarcode(code) {
+    const k = gtinSchluessel(code);
+    if (!k) return null;
+    for (const e of st.eigene.values()) if (e.barcode && gtinSchluessel(e.barcode) === k) return e;
+    return null;
+  }
 
   // Legt ein eigenes Lebensmittel an oder ändert es (mit id). Gibt den gespeicherten Eintrag zurück.
   async function speichern(daten, id = null) {
@@ -462,6 +484,8 @@ function erstellen({ speicher, blsText, timeout } = {}) {
     const alt = id ? st.eigene.get(id) : null;
     if (id && !alt) throw new Error('Dieses Lebensmittel gibt es nicht mehr.');
     if (doppelt(lm, id)) throw new Error(`„${titel(lm)}“ gibt es schon.`);
+    const gleicherCode = lm.barcode && perBarcode(lm.barcode);
+    if (gleicherCode && gleicherCode.id !== id) throw new Error(`Diesen Barcode hat schon „${titel(gleicherCode)}“.`);
     const jetzt = new Date().toISOString();
     const rec = { id: id || neueId(lm.name), ...lm, erstellt: alt ? alt.erstellt : jetzt, geaendert: jetzt };
     try { await st.sp.schreiben('lebensmittel', [rec]); } catch (e) { throw speicherFehler(e); }
@@ -496,6 +520,7 @@ function erstellen({ speicher, blsText, timeout } = {}) {
     const erg = { neu: 0, aktualisiert: 0, unveraendert: 0, fehler: [] };
     const schreiben = [];
     const namen = new Map([...st.eigene.values()].map(e => [schluessel(e), e.id]));
+    const codes = new Map([...st.eigene.values()].filter(e => e.barcode).map(e => [gtinSchluessel(e.barcode), e.id]));
     for (const roh of liste) {
       let lm;
       try { lm = pruefen(roh); }
@@ -514,11 +539,21 @@ function erstellen({ speicher, blsText, timeout } = {}) {
         else erg.fehler.push({ name: titel(lm), grund: 'Gibt es schon mit anderen Werten.' });
         continue;
       }
-      if (alt) { erg.aktualisiert++; if (namen.get(schluessel(alt)) === id) namen.delete(schluessel(alt)); }
-      else erg.neu++;
+      const bk = lm.barcode ? gtinSchluessel(lm.barcode) : '';
+      const andererCode = bk && codes.get(bk);
+      if (andererCode && andererCode !== id) {
+        erg.fehler.push({ name: titel(lm), grund: `Den Barcode hat schon „${titel(finde(andererCode))}“.` });
+        continue;
+      }
+      if (alt) {
+        erg.aktualisiert++;
+        if (namen.get(schluessel(alt)) === id) namen.delete(schluessel(alt));
+        if (alt.barcode && codes.get(gtinSchluessel(alt.barcode)) === id) codes.delete(gtinSchluessel(alt.barcode));
+      } else erg.neu++;
       const i = schreiben.findIndex(r => r.id === id);
       if (i >= 0) schreiben[i] = rec; else schreiben.push(rec);
       namen.set(k, id);
+      if (bk) codes.set(bk, id);
     }
     if (schreiben.length) {
       try { await st.sp.schreiben('lebensmittel', schreiben); } catch (e) { throw speicherFehler(e); }
@@ -546,6 +581,8 @@ function erstellen({ speicher, blsText, timeout } = {}) {
     get blsQuelle() { return st.quelle; },
     get anzahl() { return { eigen: st.eigene.size, bls: st.bls.length }; },
     get: id => st.eigene.get(id) || st.blsIndex.get(id) || null,
+    // Eigenes Lebensmittel mit diesem Barcode, sonst null
+    perBarcode,
     suche: (q, { max = 8, veg = false, filter = '' } = {}) => sucheIn(liste({ filter, veg }, st.bls), q, { max }),
     // Untergruppe aus dem BLS, z. B. „Vollkornbrot“
     gruppeName: o => o && o.code ? (st.gruppen[o.code.slice(0, 2)] || HAUPTGRUPPE_NAME[o.code[0]] || '') : '',
@@ -554,7 +591,7 @@ function erstellen({ speicher, blsText, timeout } = {}) {
 }
 
 return {
-  erstellen, ramSpeicher, idbSpeicher, pruefen, titel,
+  erstellen, ramSpeicher, idbSpeicher, pruefen, titel, gtinGueltig,
   normTxt, suchEintrag, sucheIn, istFleisch, blsZuordnung, kurzName,
   KATEGORIEN, ARTEN, ART_DEFAULT, HAUPTGRUPPEN, NW_FELDER, FORMAT
 };

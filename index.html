@@ -430,6 +430,20 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 
 /* Lebensmittel */
+/* Barcode-Scanner */
+dialog.scan{border:0;border-radius:var(--r);padding:16px;width:min(560px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+dialog.scan[open]{display:flex;flex-direction:column;gap:12px}
+dialog.scan::backdrop{background:rgba(29,43,34,.6)}
+.scan-bild{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;flex:none}
+.scan-bild video{width:100%;height:100%;object-fit:cover;display:block}
+.scan-rahmen{position:absolute;inset:28% 10%;border:3px solid rgba(255,255,255,.9);border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.25)}
+.scan-rahmen::after{content:"";position:absolute;left:6%;right:6%;top:50%;height:2px;background:var(--spice);box-shadow:0 0 8px var(--spice)}
+.scan-form{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end}
+.scan-form label{flex:1 1 220px}
+.feld-knopf{display:flex;gap:6px;align-items:center}
+@media (min-width:380px){.form-grid .breit{grid-column:span 2}}
+.feld-knopf input{flex:1}
+
 #lmHinweis:empty,#lmPanel:empty{display:none}
 #lmPanel{scroll-margin-top:calc(env(safe-area-inset-top,0px) + 136px)}
 .lmtab td.l:first-child{white-space:normal;min-width:min(60vw,240px)}
@@ -473,6 +487,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script src="lebensmittel.js"></script>
+<script src="barcode.js"></script>
 <script>
 (() => {
 'use strict';
@@ -907,7 +922,9 @@ function lmAnwenden(d, o) {
   d.basic = !!o.basic; d.zuckerZugesetzt = !!o.zuckerZugesetzt; d.trocken = !!o.trocken;
   for (const k of ['gProStk', 'gProEL', 'dichte']) if (hat(o[k])) d[k] = String(o[k]).replace('.', ',');
   if (o.stkName) d.stkName = o.stkName;
-  d.quelle = o.herkunft === 'bls' ? `BLS 4.0 · ${o.code} · ${o.name}` : `Eigenes Lebensmittel · ${Lebensmittel.titel(o)}`;
+  d.quelle = o.herkunft === 'bls' ? `BLS 4.0 · ${o.code} · ${o.name}`
+    : o.herkunft === 'eigen' ? `Eigenes Lebensmittel · ${Lebensmittel.titel(o)}`
+    : `${o.quelle || 'Open Food Facts'} · ${Lebensmittel.titel(o)}`;
 }
 const lmVorschlagName = o => o.herkunft === 'bls' ? (kurzName(o.name) || o.name) : o.name;
 function hitHtml(o) {
@@ -2211,9 +2228,11 @@ function renderZForm() {
       <div class="dbs-top">
         <label for="zfDbQ">Aus der Nährwert-Datenbank übernehmen<input id="zfDbQ" type="search" value="${esc(S.zfDbQ ?? d.name)}" placeholder="z. B. Hokkaido, Linse rot, Skyr" autocomplete="off"></label>
         <label class="check" for="zfDbVeg"><input id="zfDbVeg" type="checkbox" ${S.vegFilter ? 'checked' : ''}> Fleisch &amp; Fisch ausblenden</label>
+        <button class="btn" type="button" id="zfScan">Barcode scannen</button>
       </div>
       <ul class="dbs-list" id="zfDbList"></ul>
       ${d.quelle ? `<p class="hint">Übernommen: ${esc(d.quelle)}. Bei Markenprodukten lieber die Werte von der Packung nehmen.</p>` : ''}
+      ${String(d.quelle || '').startsWith('Open Food Facts') ? `<p class="dbs-src">${OFF_HINWEIS}</p>` : ''}
       <p class="dbs-src">${BLS_HINWEIS}</p>
     </div>
     <div class="form-grid">
@@ -2238,6 +2257,13 @@ function renderZForm() {
   </form>`;
   const zf = $('#zf');
   zf.addEventListener('input', e => { const k = e.target.dataset.k; if (k) d[k] = e.target.value; });
+  $('#zfScan').onclick = async () => {
+    const r = await produktPerBarcode();
+    if (!r || !r.o || S.zEdit !== ze) return;
+    lmAnwenden(d, r.o);
+    if (!String(d.name).trim()) d.name = r.o.name;
+    renderZForm(); toast(r.text);
+  };
   const dbq = $('#zfDbQ'), dbl = $('#zfDbList');
   const zeigeTreffer = async () => {
     const q = dbq.value.trim();
@@ -2248,7 +2274,7 @@ function renderZForm() {
     if (!dbq.isConnected || dbq.value.trim() !== q) return;
     const hits = LM.suche(q, { max: 8, veg: S.vegFilter });
     const fehlt = LM.blsStatus === 'fehler' ? '<li class="hint">Der Bundeslebensmittelschlüssel konnte nicht geladen werden. Trag die Werte von der Packung ein.</li>' : '';
-    dbl.innerHTML = (hits.map(hitHtml).join('') + fehlt) || '<li class="hint">Kein Treffer. Markenprodukte stehen nicht im Bundeslebensmittelschlüssel: Trag die Werte von der Packung ein oder leg das Produkt unter „Lebensmittel“ an.</li>';
+    dbl.innerHTML = (hits.map(hitHtml).join('') + fehlt) || '<li class="hint">Kein Treffer. Markenprodukte stehen nicht im Bundeslebensmittelschlüssel: Scann den Barcode oder trag die Werte von der Packung ein.</li>';
   };
   let dbT;
   dbq.addEventListener('input', () => { clearTimeout(dbT); dbT = setTimeout(zeigeTreffer, 180); });
@@ -2317,6 +2343,133 @@ function uniqueZutatId(name, extra) {
   return id;
 }
 
+/* ---------- Barcode ---------- */
+// Lesen und Nachschlagen stehen in barcode.js. Hier sind der Scan-Dialog und die Abläufe in den Formularen.
+const OFF_HINWEIS = 'Produktdaten: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>, Lizenz <a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>.';
+let scanLauf = null;
+// Öffnet den Scan-Dialog mit Kamera, Foto und Eingabefeld. Gibt den Barcode zurück, null bei Abbruch.
+function barcodeLesen() {
+  if (scanLauf) return scanLauf;
+  scanLauf = new Promise(resolve => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'scan';
+    dlg.setAttribute('aria-labelledby', 'scanH');
+    dlg.innerHTML = `
+      <div class="lm-top"><h3 class="sec-title" id="scanH">Barcode scannen</h3><button class="x" type="button" id="scanZu" aria-label="Schließen">×</button></div>
+      <div class="scan-bild" id="scanBild"><video id="scanVideo" playsinline muted></video><div class="scan-rahmen" aria-hidden="true"></div></div>
+      <p class="hint" id="scanStatus" role="status">Kamera wird gestartet …</p>
+      <div class="actions"><button class="btn" type="button" id="scanLicht" hidden>Licht an</button><button class="btn" type="button" id="scanFoto">Foto wählen</button><input type="file" id="scanDatei" accept="image/*" hidden></div>
+      <form class="scan-form" id="scanForm" novalidate>
+        <label for="scanCode">Oder Nummer eintippen<input id="scanCode" type="text" inputmode="numeric" autocomplete="off" placeholder="z. B. 4001234567891"></label>
+        <button class="btn btn-primary" type="submit">Suchen</button>
+      </form>
+      <p class="err" id="scanErr" hidden></p>
+      <p class="dbs-src">Ein Handscanner am PC tippt die Nummer direkt ins Feld. Unbekannte Barcodes schlägt das Kochbuch bei Open Food Facts nach.</p>`;
+    document.body.appendChild(dlg);
+    const q = sel => dlg.querySelector(sel);
+    const status = t => { q('#scanStatus').textContent = t; };
+    const fehler = t => { const e = q('#scanErr'); e.textContent = t; e.hidden = !t; };
+    let kam = null, fertig = false, licht = false;
+    const ende = code => {
+      if (fertig) return;
+      fertig = true;
+      if (kam) kam.stoppen();
+      if (dlg.open) dlg.close();
+      dlg.remove();
+      scanLauf = null;
+      resolve(code || null);
+    };
+    dlg.addEventListener('cancel', e => { e.preventDefault(); ende(null); });
+    q('#scanZu').onclick = () => ende(null);
+    q('#scanForm').onsubmit = e => {
+      e.preventDefault();
+      const c = Barcode.normieren(q('#scanCode').value);
+      if (c) ende(c); else fehler('Das ist kein gültiger Barcode. Prüf die Ziffern, ein Barcode hat 8 oder 13.');
+    };
+    q('#scanFoto').onclick = () => q('#scanDatei').click();
+    q('#scanDatei').onchange = async e => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      fehler(''); status('Foto wird gelesen …');
+      try {
+        const { detector } = await Barcode.erkenner();
+        const c = await Barcode.bildScan(f, detector);
+        if (c) return ende(c);
+        fehler('Im Foto ist kein Barcode zu erkennen. Fotografier ihn gerade und scharf, oder tipp die Nummer ein.');
+      } catch (x) { fehler(x.message); }
+      status(kam ? 'Halte den Barcode in den Rahmen.' : '');
+    };
+    q('#scanLicht').onclick = async () => {
+      if (!kam || !kam.licht) return;
+      try { licht = !licht; await kam.licht(licht); q('#scanLicht').textContent = licht ? 'Licht aus' : 'Licht an'; } catch (x) { licht = !licht; }
+    };
+    dlg.showModal();
+    // Mit Maus und Tastatur gleich ins Feld, damit ein Handscanner losschreiben kann. Am Handy nicht, sonst kommt die Tastatur.
+    if (matchMedia('(pointer: fine)').matches) q('#scanCode').focus();
+    (async () => {
+      try {
+        const { detector } = await Barcode.erkenner();
+        if (fertig) return;
+        const k = await Barcode.kameraScan(q('#scanVideo'), {
+          detector,
+          treffer: c => { try { navigator.vibrate && navigator.vibrate(60); } catch (x) {} ende(c); },
+          fehler: () => { status('Die Kamera liest gerade nicht. Wähl ein Foto oder tipp die Nummer ein.'); }
+        });
+        if (fertig) { k.stoppen(); return; }
+        kam = k;
+        status('Halte den Barcode in den Rahmen, er wird von selbst erkannt.');
+        if (kam.licht) q('#scanLicht').hidden = false;
+      } catch (x) {
+        if (fertig) return;
+        q('#scanBild').hidden = true;
+        status(x.message);
+      }
+    })();
+  });
+  return scanLauf;
+}
+// Sucht einen Barcode zuerst in den eigenen Lebensmitteln, dann bei Open Food Facts.
+// Ergebnis: { code, eigen } oder { code, off } oder { code, fehlt: true } oder { code, fehler }
+async function barcodeNachschlagen(code) {
+  await LM.oeffnen();
+  const eigen = LM.perBarcode(code);
+  if (eigen) return { code, eigen };
+  try {
+    const off = await Barcode.offAbfragen(code);
+    return off ? { code, off } : { code, fehlt: true };
+  } catch (e) { return { code, fehler: e.message }; }
+}
+// Für Formulare: Barcode lesen und das Produkt dazu suchen. Gibt { o, text } zurück, null bei Abbruch.
+async function produktPerBarcode() {
+  const code = await barcodeLesen();
+  if (!code) return null;
+  toast(`Suche ${code} …`);
+  const r = await barcodeNachschlagen(code);
+  if (r.eigen) return { o: r.eigen, text: `Werte von „${Lebensmittel.titel(r.eigen)}“ übernommen` };
+  if (r.off) return { o: { ...r.off, herkunft: 'off' }, text: 'Werte von Open Food Facts übernommen. Vergleich sie mit der Packung.' };
+  toast(r.fehler || `${code}: Dieses Produkt kennt Open Food Facts noch nicht. Trag die Werte von der Packung ein.`);
+  return { o: null };
+}
+// Reiter Lebensmittel: Bekanntes zeigen, Gefundenes zum Prüfen ins Formular, Unbekanntes mit Barcode anlegen
+async function lmScannen() {
+  const code = await barcodeLesen();
+  if (!code || S.view !== 'lebensmittel') return;
+  S.lmSel = null; S.lmEdit = null;
+  const box = $('#lmPanel');
+  if (box) { box.innerHTML = `<section class="panel"><p class="loading">Suche ${esc(code)} …</p></section>`; box.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+  const r = await barcodeNachschlagen(code);
+  if (S.view !== 'lebensmittel') return;
+  if (r.eigen) { lmZeigen(r.eigen.id); toast('Schon in deinen Lebensmitteln'); return; }
+  if (r.off) {
+    lmBearbeiten(null, lmFormDaten(r.off), `<strong>Gefunden bei Open Food Facts.</strong> Vergleich die Werte mit der Packung und ergänz, was fehlt. Nach dem Speichern erkennt das Kochbuch das Produkt auch ohne Internet. ${OFF_HINWEIS}`);
+    return;
+  }
+  lmBearbeiten(null, { ...leeresLm(), barcode: code }, r.fehler
+    ? `${esc(r.fehler)} Du kannst Name und Werte von der Packung eintragen.`
+    : `<strong>Barcode ${esc(code)} ist noch unbekannt.</strong> Trag Name und Werte von der Packung ein oder such unten ein ähnliches Lebensmittel. Beim nächsten Scan erkennt das Kochbuch das Produkt.`);
+}
+
 /* ---------- Ansicht: Lebensmittel ---------- */
 const LM_SCHRITT = 50;
 const LF_EXTRA = [
@@ -2325,7 +2478,7 @@ const LF_EXTRA = [
   ['lfEL', 'gProEL', 'Gramm pro EL', 'optional'],
   ['lfDi', 'dichte', 'Dichte (g pro ml)', 'bei Flüssigem, z. B. 1,03']
 ];
-function leeresLm() { return { name: '', marke: '', barcode: '', basis: '', kategorie: 'obst-gemuese', art: 'gemuese', artTouched: false, kcal: '', fett: '', gesFett: '', kh: '', zucker: '', ballaststoffe: '', protein: '', salz: '', omega3: '', gProStk: '', stkName: '', gProEL: '', dichte: '', basic: false, zuckerZugesetzt: false, trocken: false }; }
+function leeresLm() { return { name: '', marke: '', barcode: '', basis: '', quelle: '', kategorie: 'obst-gemuese', art: 'gemuese', artTouched: false, kcal: '', fett: '', gesFett: '', kh: '', zucker: '', ballaststoffe: '', protein: '', salz: '', omega3: '', gProStk: '', stkName: '', gProEL: '', dichte: '', basic: false, zuckerZugesetzt: false, trocken: false }; }
 // Formulardaten aus einem Lebensmittel. Aus dem BLS wird eine Kopie mit kurzem Namen, die auf dem Eintrag beruht.
 function lmFormDaten(o) {
   const d = leeresLm();
@@ -2340,7 +2493,7 @@ function viewLebensmittel() {
   <section class="wrap page">
     <div class="page-h">
       <div><h2 class="page-title">Lebensmittel</h2><p class="muted" id="lmMeta"></p></div>
-      <div class="actions"><button class="btn btn-primary" id="lmNeu" type="button">Neues Lebensmittel</button></div>
+      <div class="actions"><button class="btn" id="lmScan" type="button">Barcode scannen</button><button class="btn btn-primary" id="lmNeu" type="button">Neues Lebensmittel</button></div>
     </div>
     <div id="lmHinweis"></div>
     <div id="lmPanel"></div>
@@ -2359,10 +2512,11 @@ function viewLebensmittel() {
       <p class="hint">Eigene Lebensmittel liegen nur in diesem Browser. Mit einer Sicherung nimmst du sie auf ein anderes Gerät mit oder holst sie zurück, falls die Browserdaten gelöscht werden.</p>
       <div class="actions"><button class="btn" id="lmExport" type="button">Exportieren</button><button class="btn" id="lmImportBtn" type="button">Importieren</button><input type="file" id="lmImport" accept=".json,application/json" hidden></div>
     </section>
-    <p class="dbs-src">${BLS_HINWEIS}</p>
+    <p class="dbs-src">${BLS_HINWEIS}<br>Gescannte Produkte: ${OFF_HINWEIS}</p>
   </section>`;
   $('#lmFilter').value = S.lmFilter;
   $('#lmNeu').onclick = () => lmBearbeiten(null, leeresLm());
+  $('#lmScan').onclick = lmScannen;
   $('#lmQ').addEventListener('input', e => { S.lmQ = e.target.value; S.lmMax = LM_SCHRITT; updLmTab(); });
   $('#lmFilter').onchange = e => { S.lmFilter = e.target.value; S.lmMax = LM_SCHRITT; updLmTab(); };
   $('#lmVeg').onchange = e => { S.vegFilter = e.target.checked; LS.set('kb.vegFilter', S.vegFilter); S.lmMax = LM_SCHRITT; updLmTab(); };
@@ -2381,7 +2535,7 @@ function updLm() {
   const a = LM.anzahl;
   const eigene = a.eigen ? `${num(a.eigen)} ${a.eigen === 1 ? 'eigenes Lebensmittel' : 'eigene Lebensmittel'}` : '';
   $('#lmMeta').textContent = LM.blsStatus === 'ok'
-    ? `${num(a.bls)} Lebensmittel aus dem Bundeslebensmittelschlüssel${eigene ? ' und ' + eigene : ''}, alle Werte pro 100 g. Die Datenbank liegt auf diesem Gerät und funktioniert auch ohne Internet.${eigene ? '' : ' Markenprodukte legst du mit „Neues Lebensmittel“ an.'}`
+    ? `${num(a.bls)} Lebensmittel aus dem Bundeslebensmittelschlüssel${eigene ? ' und ' + eigene : ''}, alle Werte pro 100 g. Die Datenbank liegt auf diesem Gerät und funktioniert auch ohne Internet.${eigene ? '' : ' Markenprodukte scannst du mit „Barcode scannen“ ein.'}`
     : `${eigene || 'Noch keine eigenen Lebensmittel'}. Alle Werte pro 100 g.`;
   const h = [];
   if (LM.blsStatus === 'fehler') h.push('<div class="notice"><strong>Der Bundeslebensmittelschlüssel konnte nicht geladen werden.</strong> Die Datei bls.json muss neben der Seite liegen, und die Seite muss über einen Webserver geöffnet sein, nicht direkt als Datei. Eigene Lebensmittel gehen trotzdem.</div>');
@@ -2400,8 +2554,8 @@ function updLmTab() {
   const list = alle.slice(0, S.lmMax);
   const c = (o, k) => hat(o[k]) ? `<td class="num">${num(o[k], k === 'kcal' ? 0 : (o[k] < 1 ? 2 : 1))}</td>` : '<td class="num muted">–</td>';
   const leer = laedt ? 'Datenbank wird geladen …'
-    : q ? `Nichts gefunden für „${esc(q)}“.${S.vegFilter ? ' Fleisch und Fisch sind ausgeblendet.' : ''} Markenprodukte legst du mit „Neues Lebensmittel“ an.`
-    : S.lmFilter === 'eigen' ? 'Noch keine eigenen Lebensmittel. Leg Markenprodukte mit „Neues Lebensmittel“ an, die Werte stehen auf der Packung.'
+    : q ? `Nichts gefunden für „${esc(q)}“.${S.vegFilter ? ' Fleisch und Fisch sind ausgeblendet.' : ''} Markenprodukte scannst du mit „Barcode scannen“ ein.`
+    : S.lmFilter === 'eigen' ? 'Noch keine eigenen Lebensmittel. Scann Markenprodukte mit „Barcode scannen“ ein oder leg sie mit „Neues Lebensmittel“ an.'
     : S.vegFilter ? 'Keine Einträge. Fleisch und Fisch sind ausgeblendet.' : 'Keine Einträge.';
   tab.innerHTML = `<thead><tr><th scope="col" class="l">Lebensmittel</th><th scope="col" class="l">Gruppe</th><th scope="col">kcal</th><th scope="col">Eiweiß</th><th scope="col">KH</th><th scope="col">Fett</th><th scope="col">Ballastst.</th><th scope="col">Salz</th></tr></thead>
   <tbody>${list.map(o => { const gr = esc(o.herkunft === 'eigen' ? KAT_NAME[o.kategorie] || '' : LM.gruppeName(o)); return `<tr data-lm="${esc(o.id)}" tabindex="0"${o.id === S.lmSel ? ' aria-current="true"' : ''}><td class="l"><strong>${esc(o.name)}</strong>${o.marke ? ` <span class="muted">${esc(o.marke)}</span>` : ''}${o.herkunft === 'eigen' ? ' <span class="tag">Eigen</span>' : ''}<span class="lm-gr">${gr}</span></td><td class="l">${gr}</td>${c(o, 'kcal')}${c(o, 'protein')}${c(o, 'kh')}${c(o, 'fett')}${c(o, 'ballaststoffe')}${c(o, 'salz')}</tr>`; }).join('') || `<tr><td colspan="8" class="muted l lm-leer">${leer}</td></tr>`}</tbody>`;
@@ -2413,8 +2567,8 @@ function lmZeigen(id) {
   renderLmPanel(); updLmTab();
   const p = $('#lmPanel'); if (p) p.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
-function lmBearbeiten(id, d) {
-  S.lmEdit = { id, d }; S.lmDelAsk = false; S.lmDbQ = null;
+function lmBearbeiten(id, d, hinweis = '') {
+  S.lmEdit = { id, d, hinweis }; S.lmDelAsk = false; S.lmDbQ = null;
   renderLmPanel();
   const p = $('#lmPanel'); if (p) p.scrollIntoView({ block: 'start', behavior: 'smooth' });
   const f = $(d.name ? '#lfName' : '#lfDbQ'); if (f) f.focus({ preventScroll: true });
@@ -2482,6 +2636,7 @@ function lmDetailHtml(o) {
         <dt>Art</dt><dd>${esc(ART_NAME[o.art] || 'Sonstiges')}</dd>
         ${merkmale.length ? `<dt>Merkmale</dt><dd>${esc(merkmale.join(', '))}</dd>` : ''}
         ${umr.length ? `<dt>Umrechnung</dt><dd>${umr.join('<br>')}</dd>` : ''}
+        ${eigen && o.quelle ? `<dt>Quelle</dt><dd>${String(o.quelle).startsWith('Open Food Facts') && o.barcode ? `<a href="${esc(Barcode.offLink(o.barcode))}" target="_blank" rel="noopener">Open Food Facts</a>, Lizenz ODbL` : esc(o.quelle)}</dd>` : ''}
         ${eigen ? '' : '<dt>Hinweis</dt><dd>Abteilung und Art leitet das Kochbuch aus der BLS-Gruppe ab. Bei Markenprodukten gelten die Werte von der Packung.</dd>'}
       </dl>
     </div>
@@ -2497,6 +2652,7 @@ function renderLmForm() {
   const zahl = ([id, k, l]) => { const lid = id.replace(/^zf/, 'lf'); return `<label for="${lid}">${l}<input id="${lid}" data-k="${k}" type="text" inputmode="decimal" value="${esc(d[k])}"></label>`; };
   box.innerHTML = `<form class="panel" id="lf" novalidate>
     <h3 class="preview-h">${le.id ? 'Lebensmittel bearbeiten' : 'Neues Lebensmittel'} · Werte pro 100 g</h3>
+    ${le.hinweis ? `<div class="notice">${le.hinweis}</div>` : ''}
     <div class="dbs">
       <div class="dbs-top">
         <label for="lfDbQ">Werte aus dem Bundeslebensmittelschlüssel übernehmen<input id="lfDbQ" type="search" value="${esc(S.lmDbQ ?? d.name)}" placeholder="z. B. Skyr, Linse rot, Tahini" autocomplete="off"></label>
@@ -2507,7 +2663,7 @@ function renderLmForm() {
     <div class="form-grid">
       <label for="lfName" class="wide">Name<input id="lfName" data-k="name" type="text" value="${esc(d.name)}" placeholder="z. B. Skyr Natur"></label>
       <label for="lfMarke">Marke<input id="lfMarke" data-k="marke" type="text" value="${esc(d.marke)}" placeholder="optional"></label>
-      <label for="lfBar">Barcode (EAN)<input id="lfBar" data-k="barcode" type="text" inputmode="numeric" value="${esc(d.barcode)}" placeholder="optional"></label>
+      <label for="lfBar" class="breit">Barcode (EAN)<span class="feld-knopf"><input id="lfBar" data-k="barcode" type="text" inputmode="numeric" value="${esc(d.barcode)}" placeholder="optional"><button class="btn-mini" type="button" id="lfScan">Scannen</button></span></label>
       <label for="lfKat">Abteilung<select id="lfKat">${KATS.map(([v, l]) => `<option value="${v}" ${d.kategorie === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label for="lfArt">Art (für die Bewertung)<select id="lfArt">${ART.map(([v, l]) => `<option value="${v}" ${d.art === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${ZF_ZAHLEN.map(zahl).join('')}
@@ -2555,7 +2711,14 @@ function renderLmForm() {
     if (!String(d.name).trim()) d.name = lmVorschlagName(o);
     renderLmForm(); toast('Werte übernommen');
   });
-  if (!d.basis) zeigeTreffer();
+  if (!d.basis && !d.quelle) zeigeTreffer();
+  $('#lfScan').onclick = async () => {
+    const code = await barcodeLesen();
+    if (!code || S.lmEdit !== le) return;
+    d.barcode = code; $('#lfBar').value = code;
+    const anderes = LM.perBarcode(code);
+    if (anderes && anderes.id !== le.id) { const err = $('#lfErr'); err.textContent = `Diesen Barcode hat schon „${Lebensmittel.titel(anderes)}“.`; err.hidden = false; }
+  };
   const zu = () => { S.lmEdit = null; S.lmDelAsk = false; renderLmPanel(); };
   $('#lfCancel').onclick = zu;
   const del = $('#lfDel'); if (del) del.onclick = () => { S.lmDelAsk = true; renderLmForm(); };
